@@ -1,0 +1,128 @@
+[
+  {
+    "id": 1,
+    "start": 39.37,
+    "end": 40.63,
+    "text": "干什么干什么?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 2,
+    "start": 41.15,
+    "end": 41.85,
+    "text": "告急折子",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 3,
+    "start": 42.55,
+    "end": 43.91,
+    "text": "你这么胡闯乱撞的",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 4,
+    "start": 44.35,
+    "end": 46.11,
+    "text": "你没看见西太后正准备沐浴?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 5,
+    "start": 194.94,
+    "end": 196.56,
+    "text": "你们的国家也埋鸟放生吗?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 6,
+    "start": 197.08,
+    "end": 198.24,
+    "text": "不,我们不放生",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 7,
+    "start": 199.22,
+    "end": 201.4,
+    "text": "放生是修德行善的好事",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 8,
+    "start": 201.88,
+    "end": 203.66,
+    "text": "你们为什么不放生啊?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 9,
+    "start": 204.16,
+    "end": 205.7,
+    "text": "因为我们不捉鸽子",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 10,
+    "start": 205.7,
+    "end": 207.26,
+    "text": "鸽子可以自由自在地飞",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 11,
+    "start": 207.84,
+    "end": 209.28,
+    "text": "那你们不吃鸽子吗?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 12,
+    "start": 210.38,
+    "end": 212.72,
+    "text": "不,鸽子吃我们",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 13,
+    "start": 213.56,
+    "end": 214.46,
+    "text": "鸽子吃人?",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 14,
+    "start": 215.6,
+    "end": 217.8,
+    "text": "對,鴿子吃我們餵牠的東西",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  }
+]

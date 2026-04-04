@@ -1,0 +1,41 @@
+# Use the official PyTorch CPU wheel index in addition to PyPI.
+# pip supports global options like --extra-index-url in requirements files.
+# We pin exact +cpu builds so pip won't accidentally pick a CUDA build.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# 核心依赖
+requests>=2.32.0
+moviepy==2.1.1
+edge-tts==7.2.7
+streamlit>=1.45.0
+watchdog==6.0.0
+loguru>=0.7.3
+tomli>=2.2.1
+tomli-w>=1.0.0
+pydub==0.25.1
+pysrt==1.1.2
+
+# AI 服务依赖
+openai>=1.77.0
+litellm>=1.70.0
+google-generativeai>=0.8.5
+azure-cognitiveservices-speech>=1.37.0
+tencentcloud-sdk-python>=3.0.1200
+dashscope>=1.24.6
+
+# 图像处理依赖
+Pillow>=10.3.0
+
+# 进度条和重试机制
+tqdm>=4.66.6
+tenacity>=9.0.0
+
+# 本地语音识别
+faster-whisper>=1.0.1
+
+# CPU-only PyTorch for Docker/Linux Python 3.12
+# torchvision removed to reduce image size; current SenseVoice/FunASR chain does not need it.
+torch==2.7.1+cpu ; platform_system == "Linux"
+torchaudio==2.7.1+cpu ; platform_system == "Linux"
+funasr
+modelscope
