@@ -12,7 +12,7 @@ from app.config import config
 from app.services.cost_guard import cap_frame_records
 from app.services.evidence_fuser import fuse_scene_evidence, parse_visual_analysis_results
 from app.services.frame_selector import select_representative_frames
-from app.services.generate_narration_script import generate_narration_from_scene_evidence
+from app.services.generate_narration_script_clean import generate_narration_from_scene_evidence
 from app.services.scene_builder import build_fallback_scenes_from_keyframes, build_scenes_from_subtitles
 from app.services.script_fallback import ensure_script_shape
 from app.services.subtitle_pipeline import build_subtitle_segments, resolve_explicit_subtitle_path

@@ -8,9 +8,11 @@ from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 
 from app.services.evidence_fuser import fuse_scene_evidence
-from app.services.generate_narration_script import generate_narration_from_scene_evidence
+from app.services.generate_narration_script_clean import generate_narration_from_scene_evidence
 from app.services.plot_chunker import build_plot_chunks_from_subtitles
-from app.services.plot_understanding import add_local_understanding, build_global_summary
+from app.services.scene_builder import build_video_boundary_candidates
+from app.services.story_boundary_aligner import align_story_boundaries, collect_candidate_boundaries
+from app.services.plot_understanding_clean import add_local_understanding, build_global_summary
 from app.services.preflight_check import PreflightError, validate_script_items
 from app.services.representative_frames import extract_representative_frames_for_scenes
 from app.services.script_fallback import ensure_script_shape
@@ -110,9 +112,26 @@ def _run(
         subtitle_result.get("subtitle_path"),
     )
 
-    # 2) 字幕 -> 剧情块
-    progress(28, "整理剧情块...")
-    plot_chunks = build_plot_chunks_from_subtitles(subtitle_segments)
+    # 2) 视频候选边界 + 字幕 -> 剧情块
+    progress(22, "检测视频候选边界...")
+    video_boundary_candidates = []
+    if visual_mode != "off":
+        video_boundary_candidates = build_video_boundary_candidates(
+            video_path=video_path,
+            subtitle_segments=subtitle_segments,
+        )
+
+    progress(30, "整理剧情块...")
+    plot_chunks = build_plot_chunks_from_subtitles(
+        subtitle_segments,
+        video_candidates=video_boundary_candidates,
+        refine_chunks=True,
+    )
+    plot_chunks = align_story_boundaries(
+        plot_chunks,
+        candidate_boundaries=list(collect_candidate_boundaries(subtitle_segments)) + list(video_boundary_candidates),
+        snap_window=2.0,
+    )
     if not plot_chunks:
         raise ValueError("剧情块构建失败，未生成任何 plot chunk")
     logger.info("剧情优先 M2 完成: {} 个剧情块", len(plot_chunks))
@@ -188,6 +207,7 @@ def _run(
         "subtitle_result": subtitle_result,
         "subtitle_segments": subtitle_segments,
         "plot_chunks": plot_chunks,
+        "video_boundary_candidates": video_boundary_candidates,
         "frame_records": frame_records,
         "scene_evidence": scene_evidence,
         "global_summary": global_summary,
@@ -211,6 +231,7 @@ def _run(
             subtitle_result.get("source"), subtitle_result.get("source") or "未知来源"
         ),
         "plot_chunks": plot_chunks,
+        "video_boundary_candidates": video_boundary_candidates,
         "frame_records": frame_records,
         "scene_evidence": scene_evidence,
         "global_summary": global_summary,

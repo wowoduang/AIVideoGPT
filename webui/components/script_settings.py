@@ -22,6 +22,7 @@ MODE_FILE = "file_selection"
 MODE_SHORT = "short"
 MODE_SHORT_SUMMARY = "short_summary"
 MODE_SUBTITLE_FIRST = "summary"
+PENDING_SUBTITLE_SOURCE_MODE_KEY = "_pending_subtitle_source_mode"
 
 OST_OPTIONS = [0, 1, 2]
 OST_LABELS = {
@@ -118,6 +119,25 @@ def _normalize_legacy_mode():
     current = st.session_state.get("video_clip_json_path", "")
     if not current:
         st.session_state["video_clip_json_path"] = MODE_FILE
+
+
+def _apply_pending_subtitle_source_mode(tr):
+    pending_mode = st.session_state.pop(PENDING_SUBTITLE_SOURCE_MODE_KEY, "")
+    if not pending_mode:
+        return
+
+    subtitle_source_options = {
+        tr("Select Existing Subtitle"): "existing_subtitle",
+        tr("Upload New Subtitle"): "upload_subtitle",
+        tr("Auto Generate Subtitle"): "auto_subtitle",
+    }
+
+    selected_label = next(
+        (label for label, value in subtitle_source_options.items() if value == pending_mode),
+        tr("Select Existing Subtitle"),
+    )
+    st.session_state["subtitle_source_mode"] = pending_mode
+    st.session_state["subtitle_source_selection"] = selected_label
 
 
 def render_script_mode(tr):
@@ -477,6 +497,8 @@ def render_short_drama_summary(tr):
 
 
 def render_subtitle_first_generate_panel(tr):
+    _apply_pending_subtitle_source_mode(tr)
+
     if "subtitle_file_processed" not in st.session_state:
         st.session_state["subtitle_file_processed"] = False
     if "subtitle_source_mode" not in st.session_state:
@@ -610,7 +632,7 @@ def render_subtitle_first_generate_panel(tr):
         st.info(tr("Subtitle will be auto-generated from the video before script generation"))
 
     if st.session_state.get("subtitle_path") or subtitle_source_mode == "auto_subtitle":
-        render_subtitle_first_mode_panel(tr)
+        render_subtitle_first_mode_panel(tr, show_source_mode=False)
 
     st.text_input(
         tr("Short Drama Name"),
@@ -654,8 +676,6 @@ def render_script_buttons(tr):
             subtitle_path = st.session_state.get("short_subtitle_path", "")
             st.session_state["subtitle_path"] = subtitle_path
             st.session_state["subtitle_content"] = st.session_state.get("short_subtitle_content")
-            st.session_state["short_name"] = st.session_state.get("short_mix_name", "")
-            st.session_state["temperature"] = float(st.session_state.get("short_mix_temperature", 0.7))
             if subtitle_mode != "auto_subtitle" and (not subtitle_path or not os.path.exists(subtitle_path)):
                 st.error(tr("Short mix requires subtitle input or auto subtitle"))
                 return

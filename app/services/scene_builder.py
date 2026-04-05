@@ -308,3 +308,79 @@ def build_fallback_scenes_from_keyframes(
             }
         )
     return scenes
+
+
+def build_video_boundary_candidates(
+    video_path: str,
+    subtitle_segments: Optional[List[Dict]] = None,
+    *,
+    threshold: float = 27.0,
+    min_scene_len: float = 2.0,
+    force_split_gap: float = _FORCE_SPLIT_GAP,
+    micro_threshold: float = _MICRO_SCENE_THRESHOLD,
+    min_scene_duration: float = 1.5,
+    merge_window_sec: float = 2.0,
+) -> List[Dict]:
+    """Build weighted video boundary candidates for subtitle/story fusion.
+
+    Returns items like:
+    {time, source, type, score, reason, reasons}
+    """
+    subtitle_segments = subtitle_segments or []
+    scenes = detect_scenes_from_video(
+        video_path=video_path,
+        subtitle_segments=subtitle_segments,
+        threshold=threshold,
+        min_scene_len=min_scene_len,
+        force_split_gap=force_split_gap,
+        micro_threshold=micro_threshold,
+        min_scene_duration=min_scene_duration,
+    )
+    if not scenes:
+        return []
+
+    gap_lookup: Dict[float, float] = {}
+    for prev_seg, next_seg in zip(subtitle_segments[:-1], subtitle_segments[1:]):
+        prev_end = round(float(prev_seg.get("end", 0.0) or 0.0), 3)
+        next_start = round(float(next_seg.get("start", prev_end) or prev_end), 3)
+        gap_lookup[prev_end] = max(gap_lookup.get(prev_end, 0.0), next_start - prev_end)
+
+    raw: List[Dict] = []
+    for prev_scene, next_scene in zip(scenes[:-1], scenes[1:]):
+        boundary_time = round(float(prev_scene.get("end", 0.0) or 0.0), 3)
+        prev_duration = float(prev_scene.get("duration", 0.0) or 0.0)
+        next_duration = float(next_scene.get("duration", 0.0) or 0.0)
+        score = 0.68
+        reasons = ["视觉场景切换候选"]
+        gap = gap_lookup.get(boundary_time, 0.0)
+        if gap >= force_split_gap:
+            score += 0.14
+            reasons.append("长静默后发生画面变化")
+        if max(prev_duration, next_duration) >= 8.0:
+            score += 0.06
+            reasons.append("边界前后存在较完整场景")
+        raw.append(
+            {
+                "time": boundary_time,
+                "source": "video",
+                "sources": ["video"],
+                "type": "scene_cut_candidate",
+                "score": min(round(score, 3), 0.92),
+                "reason": reasons[0],
+                "reasons": reasons,
+            }
+        )
+
+    # merge close-by visual candidates locally to reduce jitter
+    raw.sort(key=lambda x: x["time"])
+    merged: List[Dict] = []
+    for item in raw:
+        if merged and abs(float(item["time"]) - float(merged[-1]["time"])) <= merge_window_sec:
+            prev = merged[-1]
+            prev["time"] = round((float(prev["time"]) + float(item["time"])) / 2.0, 3)
+            prev["score"] = max(float(prev.get("score", 0.5)), float(item.get("score", 0.5)))
+            prev["reasons"] = list(dict.fromkeys((prev.get("reasons") or []) + (item.get("reasons") or [])))
+            prev["reason"] = prev["reasons"][0]
+        else:
+            merged.append(dict(item))
+    return merged

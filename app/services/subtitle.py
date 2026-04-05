@@ -40,7 +40,7 @@ DEFAULT_FORCE_LANGUAGE = str(config.whisper.get("language", config.ui.get("langu
 DEFAULT_BEAM_SIZE = int(config.whisper.get("beam_size", 5))
 DEFAULT_BEST_OF = int(config.whisper.get("best_of", 5))
 DEFAULT_VAD_MIN_SILENCE_MS = int(config.whisper.get("vad_min_silence_duration_ms", 400))
-DEFAULT_INITIAL_PROMPT = config.whisper.get("initial_prompt", "以下是中文影视对白，请尽量准确识别人名、称谓、短句回应和语气词。")
+DEFAULT_INITIAL_PROMPT = str(config.whisper.get("initial_prompt", "") or "").strip()
 DEFAULT_AUDIO_FILTER = config.whisper.get("audio_filter", "highpass=f=120,lowpass=f=3800,volume=1.8")
 DEFAULT_FUNASR_BATCH_SIZE_S = int(config.whisper.get("funasr_batch_size_s", 180))
 DEFAULT_FUNASR_MERGE_LENGTH_S = int(config.whisper.get("funasr_merge_length_s", 15))
@@ -63,6 +63,9 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _MULTI_SPACE_RE = re.compile(r"[ \t\u3000]+")
 _DUP_PUNC_RE = re.compile(r"([，。！？；：,.!?;:])\1{1,}")
 _GARBAGE_WORDS_RE = re.compile(r"\b(?:Speech|BGM|EMO_UNKNOWN|NEUTRAL|HAPPY|ANGRY|SAD|FEAR|SURPRISE|DISGUST|withitn|withit|withint)\b", re.IGNORECASE)
+_LEADING_PUNCT_RE = re.compile(r"^[锛屻€傦紒锛燂紱锛氥€佲€溾€濃€樷€欍€娿€嬨€?.!?;:\]\)\}]+")
+_FILLER_ONLY_RE = re.compile(r"^[鍟婂摝璇跺攭娆稿搱鍝煎棷鍠傚憖]+[锛屻€傦紒锛燂紝,.!?]*$")
+_TERMINAL_PUNCT = ("锛?", "锛?", "銆?", ".", "!", "?", "锛?", ";")
 
 _CUE_ONLY_PATTERNS = [
     r"^\(?\s*(bgm|music|applause|laughter|laughing|sigh|crying|phone ringing|ringtone)\s*\)?$",
@@ -71,6 +74,13 @@ _CUE_ONLY_PATTERNS = [
     r"^\[?\s*(音乐|配乐|背景音乐|掌声|笑声|哭声)\s*\]?$",
 ]
 _CUE_ONLY_RE = re.compile("|".join(_CUE_ONLY_PATTERNS), re.IGNORECASE)
+_PROMPT_POLLUTION_MARKERS = tuple(
+    x for x in (
+        str(DEFAULT_INITIAL_PROMPT or "").strip(),
+        "以下是中文影视对白，请尽量准确识别人名、称谓、短句回应和语气词。",
+        "请尽量准确识别人名、称谓、短句回应和语气词。",
+    ) if x
+)
 
 _SEGMENT_JSON_SUFFIX = "_segments.json"
 _RAW_SRT_SUFFIX = "_raw.srt"
@@ -136,6 +146,9 @@ def _derive_segments_json_path(subtitle_file: str) -> str:
 
 def _clean_subtitle_text(text: str) -> str:
     text = text or ""
+    for marker in _PROMPT_POLLUTION_MARKERS:
+        if marker and marker in text:
+            text = text.replace(marker, " ")
     text = _CONTROL_TAG_GROUP_RE.sub("\n", text)
     text = _ASS_TAG_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
@@ -153,12 +166,49 @@ def _clean_subtitle_text(text: str) -> str:
     return text.strip()
 
 
+def _is_short_prefix_fragment(text: str) -> bool:
+    cleaned = _clean_subtitle_text(text)
+    if not cleaned:
+        return False
+    core = _normalize_text_core(cleaned)
+    if not core:
+        return True
+    if _LEADING_PUNCT_RE.match(cleaned):
+        return True
+    if _FILLER_ONLY_RE.match(cleaned):
+        return True
+    if len(core) <= 2 and not cleaned.endswith(_TERMINAL_PUNCT):
+        return True
+    return False
+
+
+def _merge_adjacent_text(left: str, right: str) -> str:
+    left = _clean_subtitle_text(left or "")
+    right = _clean_subtitle_text(right or "")
+    if not left:
+        return right
+    if not right:
+        return left
+    if _LEADING_PUNCT_RE.match(right):
+        right = _LEADING_PUNCT_RE.sub("", right, count=1).strip()
+    if not right:
+        return left
+    return _clean_subtitle_text(f"{left}{right}")
+
+
 def _is_meaningful_subtitle_text(text: str) -> bool:
     if not text:
         return False
     stripped = text.strip()
     if not stripped:
         return False
+    for marker in _PROMPT_POLLUTION_MARKERS:
+        if not marker:
+            continue
+        compact = stripped.replace(" ", "")
+        marker_compact = marker.replace(" ", "")
+        if stripped == marker or compact == marker_compact or compact in marker_compact:
+            return False
     if _CUE_ONLY_RE.match(stripped):
         return False
     if not re.sub(r"[，。！？；：、“”‘’《》、,.!?;:\-\—~…·\s]", "", stripped):
@@ -603,7 +653,18 @@ def _merge_overlapping_subtitles(subtitles: List[Dict[str, Any]]) -> List[Dict[s
                 prev["end_time"] = max(prev_end, end)
                 continue
             if start <= prev_end + 0.12 and (len(text) <= 4 or len(prev_text) <= 4):
-                joined = _clean_subtitle_text(prev_text + text)
+                joined = _merge_adjacent_text(prev_text, text)
+                if _is_meaningful_subtitle_text(joined):
+                    prev["msg"] = joined
+                    prev["end_time"] = max(prev_end, end)
+                    continue
+            if start <= prev_end + 0.35 and (
+                _is_short_prefix_fragment(prev_text)
+                or _is_short_prefix_fragment(text)
+                or _LEADING_PUNCT_RE.match(text)
+                or (not prev_text.endswith(_TERMINAL_PUNCT) and len(_normalize_text_core(prev_text)) <= 4)
+            ):
+                joined = _merge_adjacent_text(prev_text, text)
                 if _is_meaningful_subtitle_text(joined):
                     prev["msg"] = joined
                     prev["end_time"] = max(prev_end, end)
@@ -697,9 +758,10 @@ def _create_with_faster_whisper(audio_file: str, subtitle_file: str = ""):
         ),
         condition_on_previous_text=False,
         temperature=0.0,
-        initial_prompt=DEFAULT_INITIAL_PROMPT,
         language=forced_language,
     )
+    if DEFAULT_INITIAL_PROMPT:
+        transcribe_kwargs["initial_prompt"] = DEFAULT_INITIAL_PROMPT
     segments, info = model.transcribe(**transcribe_kwargs)
     logger.info(
         "检测到的语言: '{}', probability: {:.2f}, vad_parameters={}",

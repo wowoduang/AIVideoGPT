@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from app.services.generate_narration_script import generate_narration
+from app.services.generate_narration_script_clean import generate_narration
 
 
 def build_subtitle_first_markdown(scene_evidence: List[Dict[str, Any]]) -> str:

@@ -6,21 +6,16 @@ from loguru import logger
 
 
 # ── Oral filler words to strip (Chinese) ──────────────────────────
-# Common meaningless fillers in spoken Chinese subtitles.
 ORAL_FILLERS_ZH = [
     "嗯嗯", "嗯", "啊啊", "啊", "呃", "额", "哦", "噢",
     "那个", "就是说", "就是", "然后呢", "然后",
     "对对对", "对对", "是吧", "你知道吗", "怎么说呢",
 ]
-# Build a regex pattern – match fillers at word boundaries.
-# Longer fillers first so "嗯嗯" is tried before "嗯".
 _ORAL_FILLER_RE = re.compile(
     "|".join(re.escape(w) for w in sorted(ORAL_FILLERS_ZH, key=len, reverse=True))
 )
 
 # ── Speaker label patterns ────────────────────────────────────────
-# Matches patterns like "[A]:" or "【说话人1】:" or "Speaker1:" at the
-# beginning of a subtitle line.
 _SPEAKER_RE = re.compile(
     r"^\s*"
     r"(?:"
@@ -31,14 +26,10 @@ _SPEAKER_RE = re.compile(
     r"\s*[:：]\s*"
 )
 
-
 SRT_TIME_RE = re.compile(
     r"(?P<sh>\d{2}):(?P<sm>\d{2}):(?P<ss>\d{2}),(?P<sms>\d{3})\s*-->\s*"
     r"(?P<eh>\d{2}):(?P<em>\d{2}):(?P<es>\d{2}),(?P<ems>\d{3})"
 )
-
-# ASS/SSA Dialogue line regex
-# Format: Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 ASS_DIALOGUE_RE = re.compile(
     r"Dialogue:\s*\d+,"
     r"(?P<sh>\d+):(?P<sm>\d{2}):(?P<ss>\d{2})\.(?P<scs>\d{2}),"
@@ -46,12 +37,14 @@ ASS_DIALOGUE_RE = re.compile(
     r"[^,]*,[^,]*,[^,]*,[^,]*,[^,]*,[^,]*,"
     r"(?P<text>.+)"
 )
-
-# VTT timestamp regex (supports both . and , as ms separator)
 VTT_TIME_RE = re.compile(
     r"(?P<sh>\d{2}):(?P<sm>\d{2}):(?P<ss>\d{2})[.,](?P<sms>\d{3})\s*-->\s*"
     r"(?P<eh>\d{2}):(?P<em>\d{2}):(?P<es>\d{2})[.,](?P<ems>\d{3})"
 )
+
+PUNCT_END = set("。！？!?；;…")
+_MAJOR_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?；;…])\s*")
+_MINOR_SENTENCE_SPLIT_RE = re.compile(r"(?<=[，,、：:])\s*")
 
 
 def srt_time_to_seconds(value: str) -> float:
@@ -112,11 +105,6 @@ def parse_srt_file(filename: str) -> List[Dict]:
 
 
 def parse_ass_file(filename: str) -> List[Dict]:
-    """Parse ASS/SSA subtitle file into normalized segments.
-
-    Handles standard ASS Dialogue lines. Override/drawing tags
-    (e.g. {\\pos(...)}, {\\an8}) are stripped from the text.
-    """
     if not filename or not os.path.isfile(filename):
         return []
 
@@ -144,9 +132,7 @@ def parse_ass_file(filename: str) -> List[Dict]:
         )
 
         raw_text = match.group("text")
-        # Strip ASS override tags like {\pos(320,50)}
         raw_text = re.sub(r"\{[^}]*\}", "", raw_text)
-        # Replace \N and \n (ASS line breaks) with space
         raw_text = raw_text.replace("\\N", " ").replace("\\n", " ")
         raw_text = raw_text.strip()
         if not raw_text:
@@ -165,19 +151,12 @@ def parse_ass_file(filename: str) -> List[Dict]:
 
 
 def parse_vtt_file(filename: str) -> List[Dict]:
-    """Parse WebVTT subtitle file into normalized segments.
-
-    Handles standard WebVTT cues. HTML tags (e.g. <b>, <i>) and
-    voice tags (e.g. <v Speaker>) are stripped.
-    """
     if not filename or not os.path.isfile(filename):
         return []
 
     with open(filename, "r", encoding="utf-8") as f:
         text = f.read().replace("\r\n", "\n")
 
-    # Remove WEBVTT header and any metadata blocks
-    # Split by double newlines to get cue blocks
     blocks = re.split(r"\n\s*\n", text.strip())
     segments: List[Dict] = []
     idx = 0
@@ -186,24 +165,14 @@ def parse_vtt_file(filename: str) -> List[Dict]:
         lines = [line.strip() for line in block.split("\n") if line.strip()]
         if not lines:
             continue
-
-        # Skip WEBVTT header block
-        if lines[0].startswith("WEBVTT"):
-            continue
-        # Skip NOTE blocks
-        if lines[0].startswith("NOTE"):
-            continue
-        # Skip STYLE blocks
-        if lines[0].startswith("STYLE"):
+        if lines[0].startswith("WEBVTT") or lines[0].startswith("NOTE") or lines[0].startswith("STYLE"):
             continue
 
-        # Find the timestamp line
         time_line_idx = -1
         for i, line in enumerate(lines):
             if VTT_TIME_RE.search(line):
                 time_line_idx = i
                 break
-
         if time_line_idx < 0:
             continue
 
@@ -218,12 +187,8 @@ def parse_vtt_file(filename: str) -> List[Dict]:
             f"{match.group('eh')}:{match.group('em')}:{match.group('es')},{match.group('ems')}"
         )
 
-        # Text is everything after the timestamp line
-        content_lines = lines[time_line_idx + 1:]
-        raw_text = " ".join(content_lines).strip()
-        # Strip HTML tags (e.g. <b>, </b>, <i>, <v Speaker>)
-        raw_text = re.sub(r"<[^>]+>", "", raw_text)
-        raw_text = raw_text.strip()
+        raw_text = " ".join(lines[time_line_idx + 1:]).strip()
+        raw_text = re.sub(r"<[^>]+>", "", raw_text).strip()
         if not raw_text:
             continue
 
@@ -240,23 +205,17 @@ def parse_vtt_file(filename: str) -> List[Dict]:
 
 
 def parse_subtitle_file(filename: str) -> List[Dict]:
-    """Auto-detect subtitle format and parse into normalized segments.
-
-    Supports SRT, ASS/SSA, and WebVTT formats. Detection is based on
-    file extension with content-based fallback.
-    """
     if not filename or not os.path.isfile(filename):
         return []
 
     ext = os.path.splitext(filename)[1].lower()
     if ext in (".ass", ".ssa"):
         return parse_ass_file(filename)
-    elif ext == ".vtt":
+    if ext == ".vtt":
         return parse_vtt_file(filename)
-    elif ext == ".srt":
+    if ext == ".srt":
         return parse_srt_file(filename)
 
-    # Fallback: try to detect format from content
     with open(filename, "r", encoding="utf-8") as f:
         head = f.read(512)
 
@@ -264,16 +223,10 @@ def parse_subtitle_file(filename: str) -> List[Dict]:
         return parse_vtt_file(filename)
     if "[Script Info]" in head or "[V4+ Styles]" in head or "[V4 Styles]" in head:
         return parse_ass_file(filename)
-    # Default to SRT
     return parse_srt_file(filename)
 
 
 def _extract_speaker(text: str) -> Tuple[str, str]:
-    """Extract speaker label from the beginning of subtitle text.
-
-    Returns (speaker, remaining_text).  If no speaker label is found,
-    returns ("", original_text).
-    """
     if not text:
         return "", ""
     m = _SPEAKER_RE.match(text)
@@ -285,11 +238,9 @@ def _extract_speaker(text: str) -> Tuple[str, str]:
 
 
 def _strip_oral_fillers(text: str) -> str:
-    """Remove oral filler words from text (optional cleaning step)."""
     if not text:
         return ""
     cleaned = _ORAL_FILLER_RE.sub("", text)
-    # Collapse multiple spaces introduced by removal
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -302,7 +253,100 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
-PUNCT_END = set("。！？!?；;…")
+def _text_units(text: str) -> List[str]:
+    cleaned = _clean_text(text)
+    if not cleaned:
+        return []
+
+    major = [x.strip() for x in _MAJOR_SENTENCE_SPLIT_RE.split(cleaned) if x.strip()]
+    if len(major) > 1:
+        return major
+
+    minor = [x.strip() for x in _MINOR_SENTENCE_SPLIT_RE.split(cleaned) if x.strip()]
+    if len(minor) > 1:
+        return minor
+
+    if len(cleaned) <= 16:
+        return [cleaned]
+
+    # 最后兜底：按长度切，避免整段超长字幕继续保留为一条。
+    step = 16 if len(cleaned) > 32 else 12
+    return [cleaned[i:i + step].strip() for i in range(0, len(cleaned), step) if cleaned[i:i + step].strip()]
+
+
+def _pack_text_units(units: List[str], max_chars: int) -> List[str]:
+    if not units:
+        return []
+    packed: List[str] = []
+    current = units[0]
+    for unit in units[1:]:
+        candidate = f"{current}{unit}" if current and current[-1] in PUNCT_END else f"{current} {unit}"
+        candidate = candidate.strip()
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            packed.append(current.strip())
+            current = unit
+    if current:
+        packed.append(current.strip())
+    return packed
+
+
+def _split_long_segment(item: Dict, max_chars: int, max_duration: float, min_duration: float) -> List[Dict]:
+    text = _clean_text(item.get("text", ""))
+    if not text:
+        return []
+
+    start = float(item.get("start", 0.0) or 0.0)
+    end = float(item.get("end", start + 0.5) or (start + 0.5))
+    duration = max(end - start, min_duration)
+    should_split = len(text) > max_chars or duration > max_duration
+    if not should_split:
+        return [dict(item, text=text, start=start, end=end)]
+
+    units = _text_units(text)
+    packed = _pack_text_units(units, max_chars=max_chars)
+    if len(packed) <= 1 and len(text) > max_chars:
+        packed = [text[i:i + max_chars].strip() for i in range(0, len(text), max_chars) if text[i:i + max_chars].strip()]
+    if len(packed) <= 1 and duration <= max_duration:
+        return [dict(item, text=text, start=start, end=end)]
+
+    total_weight = sum(max(len(x.replace(" ", "")), 1) for x in packed)
+    if total_weight <= 0:
+        total_weight = len(packed)
+
+    cursor = start
+    out: List[Dict] = []
+    for idx, piece in enumerate(packed, start=1):
+        weight = max(len(piece.replace(" ", "")), 1)
+        if idx == len(packed):
+            piece_end = end
+        else:
+            piece_duration = max(duration * (weight / total_weight), min_duration)
+            remaining_min = min_duration * (len(packed) - idx)
+            piece_end = min(end - remaining_min, cursor + piece_duration)
+        piece_end = max(piece_end, cursor + min_duration)
+        out.append({
+            **item,
+            "seg_id": f"{item.get('seg_id') or 'sub'}_{idx:02d}",
+            "start": round(cursor, 3),
+            "end": round(piece_end, 3),
+            "text": piece.strip(),
+        })
+        cursor = piece_end
+
+    # 纠正最后一段结束时间和可能的倒挂。
+    out[-1]["end"] = round(max(end, float(out[-1]["start"]) + min_duration), 3)
+    fixed: List[Dict] = []
+    for idx, seg in enumerate(out, start=1):
+        cur = dict(seg)
+        if idx > 1:
+            prev = fixed[-1]
+            cur["start"] = round(float(prev["end"]), 3)
+        if float(cur["end"]) <= float(cur["start"]):
+            cur["end"] = round(float(cur["start"]) + min_duration, 3)
+        fixed.append(cur)
+    return fixed
 
 
 def normalize_segments(
@@ -314,41 +358,18 @@ def normalize_segments(
     strip_fillers: bool = True,
     detect_speaker: bool = True,
 ) -> List[Dict]:
-    """Normalize subtitle segments.
-
-    Parameters
-    ----------
-    segments : list
-        Raw parsed subtitle segments.
-    max_chars : int
-        Max characters per segment before forcing a split.
-    max_duration : float
-        Max duration (seconds) per segment.
-    min_duration : float
-        Minimum duration; shorter segments are extended.
-    merge_gap : float
-        Adjacent segments with gap <= this value may be merged.
-    strip_fillers : bool
-        If True, remove common oral filler words (e.g. 嗯, 那个).
-    detect_speaker : bool
-        If True, extract speaker labels from text (e.g. [A]: ...).
-    """
     cleaned: List[Dict] = []
     for item in segments or []:
         raw_text = item.get("text", "")
 
-        # Speaker extraction (optional)
         speaker = ""
         if detect_speaker:
             speaker, raw_text = _extract_speaker(raw_text)
 
         text = _clean_text(raw_text)
-
-        # Oral filler removal (optional)
         if strip_fillers and text:
             text = _strip_oral_fillers(text)
             text = _clean_text(text)
-
         if not text:
             continue
 
@@ -366,10 +387,13 @@ def normalize_segments(
         }
         if speaker:
             seg_dict["speaker"] = speaker
-        # Propagate confidence from ASR results if present
         if "confidence" in item:
-            seg_dict["confidence"] = float(item["confidence"])
-        cleaned.append(seg_dict)
+            try:
+                seg_dict["confidence"] = float(item["confidence"])
+            except Exception:
+                seg_dict["confidence"] = item["confidence"]
+
+        cleaned.extend(_split_long_segment(seg_dict, max_chars=max_chars, max_duration=max_duration, min_duration=min_duration))
 
     if not cleaned:
         return []
@@ -377,9 +401,9 @@ def normalize_segments(
     merged: List[Dict] = []
     current = cleaned[0].copy()
     for item in cleaned[1:]:
-        gap = item["start"] - current["end"]
+        gap = float(item["start"]) - float(current["end"])
         current_len = len(current["text"])
-        current_duration = current["end"] - current["start"]
+        current_duration = float(current["end"]) - float(current["start"])
         should_merge = (
             gap <= merge_gap
             and current_len < max_chars
@@ -390,21 +414,26 @@ def normalize_segments(
             )
         )
         if should_merge:
-            current["text"] = f"{current['text']} {item['text']}".strip()
-            current["end"] = max(current["end"], item["end"])
-        else:
-            merged.append(current)
-            current = item.copy()
+            candidate_text = f"{current['text']} {item['text']}".strip()
+            candidate_duration = float(item["end"]) - float(current["start"])
+            if len(candidate_text) <= max_chars and candidate_duration <= max_duration:
+                current["text"] = candidate_text
+                current["end"] = max(float(current["end"]), float(item["end"]))
+                continue
+
+        merged.append(current)
+        current = item.copy()
     merged.append(current)
 
     normalized: List[Dict] = []
     for idx, item in enumerate(merged, start=1):
-        duration = item["end"] - item["start"]
+        duration = float(item["end"]) - float(item["start"])
         if duration < min_duration:
-            item["end"] = item["start"] + min_duration
+            item["end"] = float(item["start"]) + min_duration
         item["text"] = _clean_text(item["text"])
         item["seg_id"] = f"sub_{idx:04d}"
         normalized.append(item)
+
     logger.info(f"字幕标准化完成: {len(segments or [])} -> {len(normalized)} 段")
     return normalized
 
@@ -417,5 +446,5 @@ def dump_segments_to_srt(segments: List[Dict], output_file: str) -> Optional[str
         for idx, seg in enumerate(segments or [], start=1):
             f.write(f"{idx}\n")
             f.write(f"{seconds_to_srt_time(seg['start'])} --> {seconds_to_srt_time(seg['end'])}\n")
-            f.write(f"{seg.get('text','').strip()}\n\n")
+            f.write(f"{seg.get('text', '').strip()}\n\n")
     return output_file

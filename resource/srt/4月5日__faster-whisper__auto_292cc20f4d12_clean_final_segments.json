@@ -1,0 +1,652 @@
+[
+  {
+    "id": 1,
+    "seg_id": "final_0001",
+    "start": 0.3,
+    "end": 1.12,
+    "text": "我们来看一看",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 2,
+    "seg_id": "final_0002",
+    "start": 23.5,
+    "end": 113.73,
+    "text": "你要能清楚问题的涅槃重心",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 3,
+    "seg_id": "final_0003",
+    "start": 116.92,
+    "end": 118.92,
+    "text": "把你小弟的号称想一想",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 4,
+    "seg_id": "final_0004",
+    "start": 137.52,
+    "end": 139.9,
+    "text": "也不晓得是哪个鬼儿子给的",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 5,
+    "seg_id": "final_0005",
+    "start": 139.9,
+    "end": 154.12,
+    "text": "是好久以前的事了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 6,
+    "seg_id": "final_0006",
+    "start": 154.12,
+    "end": 158.37,
+    "text": "我叫向腾辉",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 7,
+    "seg_id": "final_0007",
+    "start": 158.37,
+    "end": 161.53,
+    "text": "喂,今年43岁",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 8,
+    "seg_id": "final_0008",
+    "start": 163.22,
+    "end": 167.88,
+    "text": "初雨那年,我在龙山承包了一批砂石厂",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 9,
+    "seg_id": "final_0009",
+    "start": 170.46,
+    "end": 172.08,
+    "text": "记不到是哪天了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 10,
+    "seg_id": "final_0010",
+    "start": 173.12,
+    "end": 174.82,
+    "text": "我走了一条小路",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 11,
+    "seg_id": "final_0011",
+    "start": 176.57,
+    "end": 178.35,
+    "text": "一顶一的大石头",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 12,
+    "seg_id": "final_0012",
+    "start": 185.32,
+    "end": 189.98,
+    "text": "我心想,这是遇到绑捞儿了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 13,
+    "seg_id": "final_0013",
+    "start": 222.89,
+    "end": 227.69,
+    "text": "现在想起来,是脑壳遭打倒了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 14,
+    "seg_id": "final_0014",
+    "start": 240.51,
+    "end": 242.01,
+    "text": "賠了夫人又折兵",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 15,
+    "seg_id": "final_0015",
+    "start": 243.4,
+    "end": 245.22,
+    "text": "跟你說了好多回了嘛",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 16,
+    "seg_id": "final_0016",
+    "start": 245.22,
+    "end": 246.58,
+    "text": "那條路懸得很",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 17,
+    "seg_id": "final_0017",
+    "start": 247.24,
+    "end": 248.08,
+    "text": "非要錢",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 18,
+    "seg_id": "final_0018",
+    "start": 250.57,
+    "end": 252.65,
+    "text": "你看你都老掙當了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 19,
+    "seg_id": "final_0019",
+    "start": 255.1,
+    "end": 257.58,
+    "text": "沙場半年都沒發錢了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 20,
+    "seg_id": "final_0020",
+    "start": 257.58,
+    "end": 259.92,
+    "text": "工人天天圍著我鬧啊",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 21,
+    "seg_id": "final_0021",
+    "start": 259.92,
+    "end": 261.56,
+    "text": "前兩天差點把我腦殼打爆",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 22,
+    "seg_id": "final_0022",
+    "start": 261.56,
+    "end": 263.34,
+    "text": "這個是我沙場的經理",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 23,
+    "seg_id": "final_0023",
+    "start": 264.1,
+    "end": 264.96,
+    "text": "叫王總",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 24,
+    "seg_id": "final_0024",
+    "start": 265.76,
+    "end": 267.16,
+    "text": "反正沙場都不掙錢",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 25,
+    "seg_id": "final_0025",
+    "start": 267.6,
+    "end": 268.84,
+    "text": "賣給你啥事算啥錢",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 26,
+    "seg_id": "final_0026",
+    "start": 276.59,
+    "end": 279.05,
+    "text": "工人工資欠好多錢嘛",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 27,
+    "seg_id": "final_0027",
+    "start": 283.64,
+    "end": 284.68,
+    "text": "六万多",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 28,
+    "seg_id": "final_0028",
+    "start": 285.46,
+    "end": 288.26,
+    "text": "他脑壳上的伤虽然不凶",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 29,
+    "seg_id": "final_0029",
+    "start": 289.35,
+    "end": 293.05,
+    "text": "但三十场确实要垮干了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 30,
+    "seg_id": "final_0030",
+    "start": 293.53,
+    "end": 294.83,
+    "text": "我去打下网络补",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 31,
+    "seg_id": "final_0031",
+    "start": 298.9,
+    "end": 301.9,
+    "text": "你不说你这辈子都不碰gato了对吗",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 32,
+    "seg_id": "final_0032",
+    "start": 302.88,
+    "end": 305.9,
+    "text": "王总欢迎 欢迎 欢迎",
+    "source": "review_final",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 33,
+    "seg_id": "final_0033",
+    "start": 307.66,
+    "end": 310.34,
+    "text": "看一下吧这个车你管吧",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 34,
+    "seg_id": "final_0034",
+    "start": 310.92,
+    "end": 312.24,
+    "text": "古板的高级版",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 35,
+    "seg_id": "final_0035",
+    "start": 312.76,
+    "end": 313.66,
+    "text": "这个车不管",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 36,
+    "seg_id": "final_0036",
+    "start": 314.32,
+    "end": 316.14,
+    "text": "卡斯特罗的最爱",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 37,
+    "seg_id": "final_0037",
+    "start": 317.2,
+    "end": 321.74,
+    "text": "開始退了王金富在老家就是做生意的",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 38,
+    "seg_id": "final_0038",
+    "start": 322.43,
+    "end": 324.83,
+    "text": "靠著存資本掙到兩千",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 39,
+    "seg_id": "final_0039",
+    "start": 326.62,
+    "end": 329.18,
+    "text": "給我們龍山的鐵廠找點銷路",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 40,
+    "seg_id": "final_0040",
+    "start": 330.66,
+    "end": 331.92,
+    "text": "以前不得行",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 41,
+    "seg_id": "final_0041",
+    "start": 331.92,
+    "end": 334.48,
+    "text": "營銷一下就不一樣了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 42,
+    "seg_id": "final_0042",
+    "start": 335.87,
+    "end": 337.87,
+    "text": "王大師我都想好了",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 43,
+    "seg_id": "final_0043",
+    "start": 337.87,
+    "end": 341.91,
+    "text": "和存資本讓娃娃迎在未來",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 44,
+    "seg_id": "final_0044",
+    "start": 341.91,
+    "end": 346.39,
+    "text": "我們國家剛剛成功地申辦了奧林匹克",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 45,
+    "seg_id": "final_0045",
+    "start": 346.39,
+    "end": 349.17,
+    "text": "你以后一定会大力发展体育产业",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 46,
+    "seg_id": "final_0046",
+    "start": 350.12,
+    "end": 352.18,
+    "text": "你是做过管理局的人",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 47,
+    "seg_id": "final_0047",
+    "start": 352.18,
+    "end": 353.28,
+    "text": "你搞俱乐部",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 48,
+    "seg_id": "final_0048",
+    "start": 353.28,
+    "end": 355.68,
+    "text": "肯定能培养出管理局来",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 49,
+    "seg_id": "final_0049",
+    "start": 356.54,
+    "end": 359.4,
+    "text": "不是我搞是你请我搞嘛",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 50,
+    "seg_id": "final_0050",
+    "start": 365.72,
+    "end": 367.64,
+    "text": "我三股毛路",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 51,
+    "seg_id": "final_0051",
+    "start": 369.3,
+    "end": 370.86,
+    "text": "我们搞大事情呢",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 52,
+    "seg_id": "final_0052",
+    "start": 370.86,
+    "end": 371.86,
+    "text": "你在这给我冲磕",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 53,
+    "seg_id": "final_0053",
+    "start": 372.64,
+    "end": 376.44,
+    "text": "比上次说的少多了七桶事情",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 54,
+    "seg_id": "final_0054",
+    "start": 376.9,
+    "end": 379.24,
+    "text": "你先把事情搞起来",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 55,
+    "seg_id": "final_0055",
+    "start": 379.24,
+    "end": 381.3,
+    "text": "过几天我请几个领导",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 56,
+    "seg_id": "final_0056",
+    "start": 381.6,
+    "end": 384.96,
+    "text": "参加一下咱们村子村的一个展览摄影师",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 57,
+    "seg_id": "final_0057",
+    "start": 386.68,
+    "end": 388.72,
+    "text": "钱到时候给你补齐嘛",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 58,
+    "seg_id": "final_0058",
+    "start": 395.47,
+    "end": 396.49,
+    "text": "娃儿要找",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 59,
+    "seg_id": "final_0059",
+    "start": 397.19,
+    "end": 399.51,
+    "text": "要找看起来拽似的",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 60,
+    "seg_id": "final_0060",
+    "start": 401.19,
+    "end": 402.87,
+    "text": "你 你这天",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 61,
+    "seg_id": "final_0061",
+    "start": 403.77,
+    "end": 424.23,
+    "text": "清清白白把老子都杀了快点快点都下来嘛",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 62,
+    "seg_id": "final_0062",
+    "start": 424.23,
+    "end": 426.05,
+    "text": "都下来 都下来",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 63,
+    "seg_id": "final_0063",
+    "start": 427.05,
+    "end": 428.79,
+    "text": "来来来 站好",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 64,
+    "seg_id": "final_0064",
+    "start": 435.16,
+    "end": 437.02,
+    "text": "这都是花钱请来的",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  },
+  {
+    "id": 65,
+    "seg_id": "final_0065",
+    "start": 437.84,
+    "end": 438.6,
+    "text": "不好走",
+    "source": "auto_clean",
+    "backend": "faster-whisper",
+    "confidence": null
+  }
+]

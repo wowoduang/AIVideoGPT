@@ -14,7 +14,7 @@ from loguru import logger
 from app.config import config
 from app.services.subtitle_first_pipeline import run_subtitle_first_pipeline
 from app.services.subtitle_pipeline import build_subtitle_segments
-from app.services.subtitle_review import apply_review_overrides, prepare_subtitle_review
+from app.services.subtitle_review_clean import apply_review_overrides, prepare_subtitle_review
 from app.services.subtitle_text import read_subtitle_text
 
 import app.services.llm  # noqa: F401
@@ -22,6 +22,7 @@ import app.services.llm  # noqa: F401
 
 REVIEW_REQUEST_KEY = "subtitle_review_request"
 REVIEW_STATE_KEY = "subtitle_review_state"
+PENDING_SUBTITLE_SOURCE_MODE_KEY = "_pending_subtitle_source_mode"
 
 
 def parse_and_fix_json(json_string):
@@ -66,7 +67,7 @@ def _normalize_subtitle_path(subtitle_path: str, subtitle_mode: str) -> str:
 
 
 def _resolve_asr_backend() -> str:
-    return str(st.session_state.get("subtitle_asr_backend", "sensevoice") or "sensevoice").strip()
+    return str(st.session_state.get("subtitle_asr_backend", "faster-whisper") or "faster-whisper").strip()
 
 
 def _resolve_cache_mode() -> str:
@@ -93,6 +94,7 @@ def _build_request(params, subtitle_path: str, video_theme: str, temperature: fl
         "target_duration_minutes": st.session_state.get("target_duration_minutes", 8),
         "narrative_strategy": st.session_state.get("narrative_strategy", "chronological"),
         "accuracy_priority": st.session_state.get("accuracy_priority", "high"),
+        "highlight_only": bool(st.session_state.get("highlight_only_mode", False)),
         "asr_backend": _resolve_asr_backend(),
         "cache_mode": _resolve_cache_mode(),
         "review_mode": _resolve_review_mode(),
@@ -103,9 +105,19 @@ def _save_pipeline_success(pipeline_result: dict):
     st.session_state["video_clip_json"] = pipeline_result["script_items"]
     st.session_state["subtitle_first_evidence"] = pipeline_result.get("evidence", [])
     st.session_state["subtitle_first_global_summary"] = pipeline_result.get("global_summary", {})
+    st.session_state["subtitle_first_highlights"] = pipeline_result.get("story_highlights", [])
+    st.session_state["subtitle_first_full_understanding"] = pipeline_result.get("full_subtitle_understanding", {})
+    st.session_state["subtitle_first_llm_highlight_plan"] = pipeline_result.get("llm_highlight_plan", {})
     st.session_state["video_clip_json_path"] = pipeline_result.get(
-        "script_path", st.session_state.get("video_clip_json_path", "")
+        "composition_script_path",
+        pipeline_result.get("script_path", st.session_state.get("video_clip_json_path", "")),
     )
+    if pipeline_result.get("highlight_script_path"):
+        st.session_state["subtitle_first_highlight_script_path"] = pipeline_result.get("highlight_script_path")
+    if pipeline_result.get("highlights_path"):
+        st.session_state["subtitle_first_highlights_path"] = pipeline_result.get("highlights_path")
+    if pipeline_result.get("audit_path"):
+        st.session_state["subtitle_first_audit_path"] = pipeline_result.get("audit_path")
     st.session_state["movie_story_plot_chunks"] = pipeline_result.get("plot_chunks", [])
     st.session_state["movie_story_frame_records"] = pipeline_result.get("frame_records", [])
 
@@ -130,7 +142,9 @@ def _save_pipeline_success(pipeline_result: dict):
     if pipeline_result.get("subtitle_segments_path"):
         st.session_state["subtitle_segments_json_path"] = pipeline_result["subtitle_segments_path"]
 
-    st.session_state["subtitle_source_mode"] = "existing_subtitle"
+    # Delay subtitle source mode updates until the next rerun, before widgets
+    # with the same keys are instantiated again.
+    st.session_state[PENDING_SUBTITLE_SOURCE_MODE_KEY] = "existing_subtitle"
 
 
 def _run_pipeline_from_request(request: dict, subtitle_path: str, progress_callback):
@@ -148,6 +162,7 @@ def _run_pipeline_from_request(request: dict, subtitle_path: str, progress_callb
             "target_duration_minutes": request["target_duration_minutes"],
             "narrative_strategy": request["narrative_strategy"],
             "accuracy_priority": request["accuracy_priority"],
+            "highlight_only": request["highlight_only"],
             "video_title": request["video_theme"],
             "short_name": request["video_theme"],
             "temperature": request["temperature"],

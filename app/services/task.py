@@ -79,28 +79,104 @@ def _normalize_script_list(items):
 merged_audio_path = ""
 merged_subtitle_path = ""
 
+_SCRIPT_MODE_SENTINELS = {"summary", "short_summary", "short", "file_selection", "upload_script"}
 
-def _load_and_prepare_script(video_script_path: str):
-    if not path.exists(video_script_path):
-        logger.error(f"解说脚本文件不存在: {video_script_path}，请先点击【保存脚本】按钮保存脚本后再生成视频")
-        raise ValueError("解说脚本文件不存在！请先点击【保存脚本】按钮保存脚本后再生成视频。")
 
-    try:
-        with open(video_script_path, "r", encoding="utf-8") as f:
-            list_script = json.load(f)
-        list_script = ensure_script_shape(list_script)
-        list_script = _normalize_script_list(list_script)
-        validate_script_items(list_script)
-        video_ost = [i["OST"] for i in list_script]
-        logger.debug(f"解说完整脚本: {' '.join(i['narration'] for i in list_script)}")
-        logger.debug(f"解说 OST 列表: {video_ost}")
-        logger.debug(f"解说时间戳列表: {[i['timestamp'] for i in list_script]}")
-        return list_script, video_ost
-    except PreflightError:
-        raise
-    except Exception as e:
-        logger.error(f"无法读取视频json脚本，请检查脚本格式是否正确: {e}")
-        raise ValueError("无法读取视频json脚本，请检查脚本格式是否正确")
+def _prefer_highlight_script_path(video_script_path: str) -> str:
+    normalized_path = str(video_script_path or "").strip()
+    if not normalized_path or not path.isfile(normalized_path):
+        return normalized_path
+    if normalized_path.endswith("_highlight_script.json"):
+        return normalized_path
+    if normalized_path.endswith("_movie_story.json"):
+        candidate = normalized_path[:-len("_movie_story.json")] + "_highlight_script.json"
+        if path.isfile(candidate):
+            logger.info(f"检测到高光脚本，优先用于最终合成: {candidate}")
+            return candidate
+    return normalized_path
+
+
+def _prepare_script_items(list_script):
+    list_script = ensure_script_shape(list_script)
+    list_script = _normalize_script_list(list_script)
+    validate_script_items(list_script)
+    _validate_composition_script_quality(list_script)
+    video_ost = [i["OST"] for i in list_script]
+    logger.debug(f"解说完整脚本: {' '.join(i['narration'] for i in list_script)}")
+    logger.debug(f"解说 OST 列表: {video_ost}")
+    logger.debug(f"解说时间戳列表: {[i['timestamp'] for i in list_script]}")
+    return list_script, video_ost
+
+
+def _validate_composition_script_quality(list_script):
+    if not list_script:
+        raise ValueError("最终合成脚本为空")
+
+    issues = []
+    has_highlight_metadata = any("llm_highlight_selected" in item for item in list_script)
+    highlight_only_mode = any(bool(item.get("highlight_id")) for item in list_script) and all(
+        str(item.get("narration") or "").strip() == "" for item in list_script
+    )
+
+    for idx, item in enumerate(list_script, start=1):
+        seg_label = str(item.get("segment_id") or item.get("_id") or idx)
+        start = float(item.get("start", 0.0) or 0.0)
+        end = float(item.get("end", start) or start)
+        if end <= start:
+            issues.append(f"片段时间非法: {seg_label}")
+        if has_highlight_metadata and not bool(item.get("llm_highlight_selected")) and not highlight_only_mode:
+            issues.append(f"脚本包含未通过高光筛选的片段: {seg_label}")
+        nv = item.get("narration_validation") or {}
+        if nv.get("status") == "reject":
+            issues.append(f"脚本包含被拒绝的解说文案: {seg_label}")
+        if int(item.get("OST", 2) or 2) == 1 and not highlight_only_mode:
+            if not bool(item.get("llm_raw_voice_keep")) and not bool(item.get("raw_voice_retain_suggestion")):
+                issues.append(f"原声片段未经高光许可: {seg_label}")
+        if not highlight_only_mode and int(item.get("OST", 2) or 2) in {0, 2} and not str(item.get("narration") or "").strip():
+            issues.append(f"需配音片段缺少解说词: {seg_label}")
+
+    deduped = []
+    for issue in issues:
+        if issue not in deduped:
+            deduped.append(issue)
+    if deduped:
+        raise ValueError("；".join(deduped))
+
+
+def _is_highlight_only_script(list_script) -> bool:
+    return bool(list_script) and any(bool(item.get("highlight_id")) for item in list_script) and all(
+        str(item.get("narration") or "").strip() == "" for item in list_script
+    )
+
+
+def _load_and_prepare_script(video_script_path: str, fallback_items=None):
+    normalized_path = _prefer_highlight_script_path(video_script_path)
+    can_use_fallback = bool(fallback_items)
+    path_looks_like_mode = normalized_path in _SCRIPT_MODE_SENTINELS
+
+    if normalized_path and path.exists(normalized_path):
+        try:
+            with open(normalized_path, "r", encoding="utf-8") as f:
+                list_script = json.load(f)
+            return _prepare_script_items(list_script)
+        except PreflightError:
+            raise
+        except Exception as e:
+            logger.error(f"无法读取视频 json 脚本，请检查脚本格式是否正确: {e}")
+            raise ValueError("无法读取视频 json 脚本，请检查脚本格式是否正确")
+
+    if can_use_fallback:
+        if normalized_path:
+            if path_looks_like_mode:
+                logger.warning(f"检测到脚本模式标识 {normalized_path}，将直接使用内存中的脚本内容继续处理")
+            else:
+                logger.warning(f"脚本文件不存在: {normalized_path}，将回退到当前已生成但未保存的脚本内容")
+        else:
+            logger.warning("未提供脚本文件路径，将直接使用当前已生成的脚本内容")
+        return _prepare_script_items(fallback_items)
+
+    logger.error(f"解说脚本文件不存在: {normalized_path}，请先点击【保存脚本】按钮保存脚本后再生成视频")
+    raise ValueError("解说脚本文件不存在！请先点击【保存脚本】按钮保存脚本后再生成视频。")
 
 
 def _build_tts_results(task_id: str, list_script, params):
@@ -250,7 +326,8 @@ def _run_pipeline(task_id: str, params: VideoClipParams):
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=0)
 
     logger.info("\n\n## 1. 加载视频脚本")
-    list_script, video_ost = _load_and_prepare_script(path.join(params.video_clip_json_path))
+    list_script, video_ost = _load_and_prepare_script(params.video_clip_json_path, fallback_items=params.video_clip_json)
+    logger.info("最终合成脚本模式: {}", "highlight_only" if _is_highlight_only_script(list_script) else "narrated_story")
 
     logger.info("\n\n## 2. 根据OST设置生成音频列表")
     try:
