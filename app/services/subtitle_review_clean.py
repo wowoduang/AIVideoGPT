@@ -8,6 +8,7 @@ from typing import Dict, List
 
 from loguru import logger
 
+from app.services.video_working_copy import ensure_working_video_copy
 from app.utils import utils
 
 
@@ -175,13 +176,14 @@ def _extract_frame_ffmpeg(video_path: str, timestamp: float, image_path: str) ->
 def extract_review_frames(video_path: str, candidates: List[Dict], output_dir: str = "") -> List[Dict]:
     if not video_path or not os.path.exists(video_path):
         return candidates
+    processing_video_path = ensure_working_video_copy(video_path, purpose="subtitle_review_frames")
     output_dir = output_dir or os.path.join(utils.temp_dir("subtitle_review_frames"), utils.md5(video_path))
     os.makedirs(output_dir, exist_ok=True)
 
     for cand in candidates:
         midpoint = (float(cand["start"]) + float(cand["end"])) / 2.0
         frame_path = os.path.join(output_dir, f"{cand['candidate_id']}.jpg")
-        if os.path.exists(frame_path) or _extract_frame_ffmpeg(video_path, midpoint, frame_path):
+        if os.path.exists(frame_path) or _extract_frame_ffmpeg(processing_video_path, midpoint, frame_path):
             cand["frame_path"] = frame_path
     return candidates
 

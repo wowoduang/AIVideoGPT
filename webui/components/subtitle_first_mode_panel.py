@@ -8,6 +8,9 @@ WIDGET_KEYS = {
     "subtitle_asr_backend": "_widget_subtitle_asr_backend",
     "subtitle_cache_mode": "_widget_subtitle_cache_mode",
     "subtitle_review_mode": "_widget_subtitle_review_mode",
+    "prologue_strategy": "_widget_prologue_strategy",
+    "manual_prologue_end_time": "_widget_manual_prologue_end_time",
+    "highlight_selectivity": "_widget_highlight_selectivity",
     "highlight_only_mode": "_widget_highlight_only_mode",
     "generation_mode": "_widget_generation_mode",
     "visual_mode": "_widget_visual_mode",
@@ -30,6 +33,9 @@ def init_subtitle_first_mode_state():
     st.session_state.setdefault("subtitle_asr_backend", "faster-whisper")
     st.session_state.setdefault("subtitle_cache_mode", "clear_and_regenerate")
     st.session_state.setdefault("subtitle_review_mode", "review_suspicious")
+    st.session_state.setdefault("prologue_strategy", "speech_first")
+    st.session_state.setdefault("manual_prologue_end_time", "")
+    st.session_state.setdefault("highlight_selectivity", "balanced")
     st.session_state.setdefault("highlight_only_mode", False)
     st.session_state.setdefault("generation_mode", "balanced")
     st.session_state.setdefault("visual_mode", "auto")
@@ -81,7 +87,13 @@ def render_subtitle_first_mode_panel(tr=None, show_source_mode: bool = True):
         with cols[0]:
             st.selectbox(
                 _label(tr, "字幕识别后端"),
-                options=["sensevoice", "faster-whisper"],
+                options=["sensevoice", "faster-whisper", "videocaptioner_shell", "videolingo_shell"],
+                format_func=lambda x: {
+                    "sensevoice": "SenseVoice",
+                    "faster-whisper": "faster-whisper",
+                    "videocaptioner_shell": "VideoCaptioner",
+                    "videolingo_shell": "VideoLingo (shell)",
+                }.get(x, x),
                 key=WIDGET_KEYS["subtitle_asr_backend"],
             )
             _sync_state_from_widget("subtitle_asr_backend")
@@ -111,11 +123,45 @@ def render_subtitle_first_mode_panel(tr=None, show_source_mode: bool = True):
             )
             _sync_state_from_widget("generation_mode")
 
+        cols2b = st.columns(2)
+        with cols2b[0]:
+            st.selectbox(
+                "序幕判断",
+                options=["speech_first", "llm_auto", "manual_time"],
+                format_func=lambda x: {
+                    "speech_first": "人声起点优先",
+                    "llm_auto": "LLM 自动判断",
+                    "manual_time": "手动输入时间",
+                }.get(x, x),
+                key=WIDGET_KEYS["prologue_strategy"],
+            )
+            _sync_state_from_widget("prologue_strategy")
+        with cols2b[1]:
+            st.text_input(
+                "序幕结束时间",
+                placeholder="例如 13 / 00:00:13 / 00:00:13,500",
+                key=WIDGET_KEYS["manual_prologue_end_time"],
+                disabled=st.session_state.get("prologue_strategy") != "manual_time",
+            )
+            _sync_state_from_widget("manual_prologue_end_time")
+
         st.checkbox(
             _label(tr, "仅生成高光验证脚本（不生成解说）"),
             key=WIDGET_KEYS["highlight_only_mode"],
         )
         _sync_state_from_widget("highlight_only_mode")
+
+        st.selectbox(
+            "Highlight Selectivity",
+            options=["loose", "balanced", "strict"],
+            format_func=lambda x: {
+                "loose": "Loose",
+                "balanced": "Balanced",
+                "strict": "Strict",
+            }.get(x, x),
+            key=WIDGET_KEYS["highlight_selectivity"],
+        )
+        _sync_state_from_widget("highlight_selectivity")
 
         cols3 = st.columns(2)
         with cols3[0]:

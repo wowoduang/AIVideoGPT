@@ -878,6 +878,44 @@ def get_optimal_ffmpeg_encoder() -> str:
         return "libx264"  # 默认软件编码器
 
 
+def get_resilient_decode_input_args(
+    start_time: Optional[Union[str, float]] = None,
+    duration: Optional[Union[str, float]] = None,
+    *,
+    ignore_decode_errors: bool = True,
+    discard_corrupt: bool = True,
+) -> List[str]:
+    """
+    Build safer FFmpeg input options for partially corrupted video streams.
+
+    This is especially helpful for HEVC sources that contain damaged GOPs or
+    missing reference frames.
+    """
+    args: List[str] = []
+
+    if discard_corrupt:
+        args.extend(["-fflags", "+discardcorrupt+genpts"])
+
+    if ignore_decode_errors:
+        args.extend(["-err_detect", "ignore_err"])
+
+    if start_time not in (None, ""):
+        args.extend(["-ss", str(start_time)])
+
+    if duration not in (None, ""):
+        try:
+            duration_value = float(duration)
+        except (TypeError, ValueError):
+            duration_text = str(duration).strip()
+            if duration_text:
+                args.extend(["-t", duration_text])
+        else:
+            if duration_value > 0:
+                args.extend(["-t", f"{duration_value:.3f}"])
+
+    return args
+
+
 def get_ffmpeg_command_with_hwaccel(input_path: str, output_path: str, **kwargs) -> List[str]:
     """
     生成带有硬件加速的FFmpeg命令

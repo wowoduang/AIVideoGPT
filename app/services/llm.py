@@ -403,12 +403,25 @@ def compress_video(input_path: str, output_path: str):
         logger.info(f"压缩视频文件已存在: {output_path}")
         return
 
+    clip = None
     try:
+        logger.info("开始压缩视频: {}", output_path)
         clip = VideoFileClip(input_path)
-        clip.write_videofile(output_path, codec='libx264', audio_codec='aac', bitrate="500k", audio_bitrate="128k")
+        clip.write_videofile(
+            output_path,
+            codec='libx264',
+            audio_codec='aac',
+            bitrate="500k",
+            audio_bitrate="128k",
+            logger=None,
+        )
+        logger.info("压缩视频完成: {}", output_path)
     except subprocess.CalledProcessError as e:
         logger.error(f"视频压缩失败: {e}")
         raise
+    finally:
+        if clip is not None:
+            clip.close()
 
 
 def generate_script(

@@ -16,6 +16,8 @@ from loguru import logger
 from typing import Dict, List, Optional
 from pathlib import Path
 
+from app.services.media_duration import inspect_media_file, summarize_media_file
+from app.services.video_working_copy import ensure_working_video_copy
 from app.utils import ffmpeg_utils, utils
 
 def _split_timestamp(timestamp: str) -> tuple[str, str]:
@@ -34,9 +36,32 @@ def _seconds_to_ffmpeg_time(seconds: float) -> str:
     return utils.format_time(float(seconds or 0.0)).replace(",", ".")
 
 
+def _clip_duration_seconds(start_time: str, end_time: str) -> float:
+    duration = _timestamp_to_seconds(end_time) - _timestamp_to_seconds(start_time)
+    return round(max(duration, 0.001), 3)
+
+
 def _seconds_to_safe_token(seconds: float) -> str:
     ts = utils.format_time(float(seconds or 0.0))
     return ts.replace(":", "-").replace(",", "-")
+
+
+def _cleanup_invalid_output(file_path: str) -> None:
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+
+
+def _has_valid_video_output(file_path: str, *, context: str) -> bool:
+    media_info = inspect_media_file(file_path, include_audio=True)
+    if media_info.get("is_valid_video"):
+        return True
+
+    logger.warning(f"{context} 无有效视频流或时长异常: {file_path} | {summarize_media_file(media_info)}")
+    _cleanup_invalid_output(file_path)
+    return False
 
 
 def parse_timestamp(timestamp: str) -> tuple:
@@ -157,7 +182,8 @@ def build_ffmpeg_command(
     Returns:
         List[str]: ffmpeg命令列表
     """
-    cmd = ["ffmpeg", "-y"]
+    clip_duration = _clip_duration_seconds(start_time, end_time)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
     
     # 关键修正：对于视频裁剪，不使用CUDA硬件解码，只使用NVENC编码器
     # 这样能避免滤镜链格式转换错误，同时保持编码性能优势
@@ -169,11 +195,13 @@ def build_ffmpeg_command(
         # 对于其他编码器，可以使用硬件解码参数
         cmd.extend(hwaccel_args)
     
-    # 输入文件
+    cmd.extend(
+        ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=clip_duration,
+        )
+    )
     cmd.extend(["-i", input_path])
-    
-    # 时间范围
-    cmd.extend(["-ss", start_time, "-to", end_time])
     
     # 编码器设置
     cmd.extend(["-c:v", encoder_config["video_codec"]])
@@ -256,10 +284,24 @@ def execute_ffmpeg_with_fallback(
         if is_windows:
             process_kwargs["encoding"] = 'utf-8'
         
-        result = subprocess.run(cmd, **process_kwargs)
+        subprocess.run(cmd, **process_kwargs)
+
+        output_path = cmd[-1]
+        if _has_valid_video_output(output_path, context=f"{method_name}输出[{timestamp}]"):
+            logger.info(f"{method_name} 成功: {timestamp}")
+            return True
+
+        logger.error(f"{method_name} 失败，输出片段无有效视频流: {output_path}")
+        return False
+
+        if _has_valid_video_output(output_path, context=f"主裁剪输出[{timestamp}]"):
+            return True
+
+        logger.warning(f"主裁剪命令返回成功但输出片段无效，尝试通用回退: {timestamp}")
+        return try_fallback_encoding(input_path, output_path, start_time, end_time, timestamp)
         
         # 验证输出文件
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        if _has_valid_video_output(output_path, context=f"主裁剪输出[{timestamp}]"):
             # logger.info(f"✓ 视频裁剪成功: {timestamp}")
             return True
         else:
@@ -280,6 +322,9 @@ def execute_ffmpeg_with_fallback(
             return try_compatibility_fallback(input_path, output_path, start_time, end_time, timestamp)
         elif error_type == "hardware_error":
             logger.info(f"检测到硬件加速错误，尝试软件编码: {timestamp}")
+            return try_software_fallback(input_path, output_path, start_time, end_time, timestamp)
+        elif error_type == "decode_error":
+            logger.info(f"检测到视频解码错误，尝试容错软件编码: {timestamp}")
             return try_software_fallback(input_path, output_path, start_time, end_time, timestamp)
         elif error_type == "encoder_error":
             logger.info(f"检测到编码器错误，尝试基本编码: {timestamp}")
@@ -318,6 +363,19 @@ def analyze_ffmpeg_error(error_msg: str) -> str:
         "hardware", "hwaccel", "gpu", "device"
     ]):
         return "hardware_error"
+
+    # 解码/码流损坏错误
+    if any(keyword in error_msg_lower for keyword in [
+        "could not find ref with poc",
+        "error constructing the frame rps",
+        "missing reference picture",
+        "reference picture missing",
+        "decode slice header error",
+        "invalid nal unit",
+        "corrupt decoded frame",
+        "error while decoding",
+    ]):
+        return "decode_error"
     
     # 编码器错误
     if any(keyword in error_msg_lower for keyword in [
@@ -332,6 +390,62 @@ def analyze_ffmpeg_error(error_msg: str) -> str:
         return "file_error"
     
     return "unknown_error"
+
+
+def execute_ffmpeg_with_fallback_validated(
+    cmd: List[str],
+    timestamp: str,
+    input_path: str,
+    output_path: str,
+    start_time: str,
+    end_time: str,
+) -> bool:
+    try:
+        is_windows = os.name == 'nt'
+        process_kwargs = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "check": True,
+        }
+
+        if is_windows:
+            process_kwargs["encoding"] = "utf-8"
+
+        subprocess.run(cmd, **process_kwargs)
+
+        if _has_valid_video_output(output_path, context=f"主裁剪输出[{timestamp}]"):
+            return True
+
+        logger.warning(f"主裁剪命令返回成功但输出片段无效，尝试通用回退: {timestamp}")
+        return try_fallback_encoding(input_path, output_path, start_time, end_time, timestamp)
+
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr if e.stderr else str(e)
+        logger.warning(f"主命令失败: {error_msg}")
+
+        error_type = analyze_ffmpeg_error(error_msg)
+        logger.debug(f"错误类型分析: {error_type}")
+
+        if error_type == "filter_chain_error":
+            logger.info(f"检测到滤镜链错误，尝试兼容模式: {timestamp}")
+            return try_compatibility_fallback(input_path, output_path, start_time, end_time, timestamp)
+        if error_type in {"hardware_error", "decode_error"}:
+            logger.info(f"检测到硬件/解码问题，尝试软件编码: {timestamp}")
+            return try_software_fallback(input_path, output_path, start_time, end_time, timestamp)
+        if error_type == "encoder_error":
+            logger.info(f"检测到编码器问题，尝试基础编码: {timestamp}")
+            return try_basic_fallback(input_path, output_path, start_time, end_time, timestamp)
+
+        logger.info(f"尝试通用回退方案: {timestamp}")
+        return try_fallback_encoding(input_path, output_path, start_time, end_time, timestamp)
+
+    except Exception as e:
+        logger.error(f"执行ffmpeg命令时发生异常: {str(e)}")
+        return False
+
+
+execute_ffmpeg_with_fallback = execute_ffmpeg_with_fallback_validated
 
 
 def try_compatibility_fallback(
@@ -357,9 +471,11 @@ def try_compatibility_fallback(
     # 兼容性模式：避免所有可能的滤镜链问题
     fallback_cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        *ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=_clip_duration_seconds(start_time, end_time),
+        ),
         "-i", input_path,
-        "-ss", start_time,
-        "-to", end_time,
         "-c:v", "libx264",
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",  # 明确指定像素格式
@@ -398,9 +514,11 @@ def try_software_fallback(
     # 纯软件编码
     fallback_cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        *ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=_clip_duration_seconds(start_time, end_time),
+        ),
         "-i", input_path,
-        "-ss", start_time,
-        "-to", end_time,
         "-c:v", "libx264",
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",
@@ -438,9 +556,11 @@ def try_basic_fallback(
     # 最基本的编码参数
     fallback_cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        *ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=_clip_duration_seconds(start_time, end_time),
+        ),
         "-i", input_path,
-        "-ss", start_time,
-        "-to", end_time,
         "-c:v", "libx264",
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",
@@ -498,6 +618,45 @@ def execute_simple_command(cmd: List[str], timestamp: str, method_name: str) -> 
         return False
 
 
+def execute_simple_command_validated(cmd: List[str], timestamp: str, method_name: str) -> bool:
+    """
+    执行简单 FFmpeg 命令，并校验输出片段是否真的包含有效视频流。
+    """
+    try:
+        logger.debug(f"执行{method_name}命令: {' '.join(cmd)}")
+
+        is_windows = os.name == 'nt'
+        process_kwargs = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "check": True,
+        }
+
+        if is_windows:
+            process_kwargs["encoding"] = "utf-8"
+
+        subprocess.run(cmd, **process_kwargs)
+
+        output_path = cmd[-1]
+        if _has_valid_video_output(output_path, context=f"{method_name}输出[{timestamp}]"):
+            logger.info(f"{method_name} 成功: {timestamp}")
+            return True
+
+        logger.error(f"{method_name} 失败，输出片段无有效视频流: {output_path}")
+        return False
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr if e.stderr else str(e)
+        logger.error(f"{method_name}失败: {error_msg}")
+        return False
+    except Exception as e:
+        logger.error(f"{method_name}异常: {str(e)}")
+        return False
+
+
+execute_simple_command = execute_simple_command_validated
+
+
 def try_fallback_encoding(
     input_path: str,
     output_path: str,
@@ -520,10 +679,12 @@ def try_fallback_encoding(
     """
     # 最简单的软件编码命令
     fallback_cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        *ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=_clip_duration_seconds(start_time, end_time),
+        ),
         "-i", input_path,
-        "-ss", start_time,
-        "-to", end_time,
         "-c:v", "libx264",
         "-c:a", "aac",
         "-pix_fmt", "yuv420p",
@@ -708,7 +869,8 @@ def _build_ffmpeg_command_with_audio_control(
     Returns:
         List[str]: ffmpeg命令列表
     """
-    cmd = ["ffmpeg", "-y"]
+    clip_duration = _clip_duration_seconds(start_time, end_time)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
 
     # 硬件加速设置（参考原有逻辑）
     if encoder_config["video_codec"] == "h264_nvenc":
@@ -717,11 +879,13 @@ def _build_ffmpeg_command_with_audio_control(
     elif hwaccel_args:
         cmd.extend(hwaccel_args)
 
-    # 输入文件
+    cmd.extend(
+        ffmpeg_utils.get_resilient_decode_input_args(
+            start_time=start_time,
+            duration=clip_duration,
+        )
+    )
     cmd.extend(["-i", input_path])
-
-    # 时间范围
-    cmd.extend(["-ss", start_time, "-to", end_time])
 
     # 视频编码器设置
     cmd.extend(["-c:v", encoder_config["video_codec"]])
@@ -792,6 +956,7 @@ def clip_video_unified(
     # 检查视频文件是否存在
     if not os.path.exists(video_origin_path):
         raise FileNotFoundError(f"视频文件不存在: {video_origin_path}")
+    processing_video_path = ensure_working_video_copy(video_origin_path, purpose="clip_video_unified")
 
     # 如果未提供task_id，则根据输入生成一个唯一ID
     if task_id is None:
@@ -844,24 +1009,24 @@ def clip_video_unified(
         try:
             if ost == 0:  # 纯解说片段
                 output_path = _process_narration_only_segment(
-                    video_origin_path, script_item, tts_map, output_dir,
+                    processing_video_path, script_item, tts_map, output_dir,
                     encoder_config, hwaccel_args
                 )
             elif ost == 1:  # 纯原声片段
                 output_path = _process_original_audio_segment(
-                    video_origin_path, script_item, output_dir,
+                    processing_video_path, script_item, output_dir,
                     encoder_config, hwaccel_args
                 )
             elif ost == 2:  # 解说+原声混合片段
                 output_path = _process_mixed_segment(
-                    video_origin_path, script_item, tts_map, output_dir,
+                    processing_video_path, script_item, tts_map, output_dir,
                     encoder_config, hwaccel_args
                 )
             else:
                 logger.warning(f"未知的OST类型: {ost}，跳过片段 {_id}")
                 continue
 
-            if output_path and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            if output_path and _has_valid_video_output(output_path, context=f"统一裁剪输出[{timestamp}]"):
                 result[_id] = output_path
                 success_count += 1
                 logger.info(f"✅ [{i}/{total_clips}] 片段处理成功: OST={ost}, ID={_id}")
@@ -911,6 +1076,7 @@ def clip_video(
     # 检查视频文件是否存在
     if not os.path.exists(video_origin_path):
         raise FileNotFoundError(f"视频文件不存在: {video_origin_path}")
+    processing_video_path = ensure_working_video_copy(video_origin_path, purpose="clip_video")
 
     # 如果未提供task_id，则根据输入生成一个唯一ID
     if task_id is None:
@@ -1014,7 +1180,7 @@ def clip_video(
 
         # 构建FFmpeg命令
         ffmpeg_cmd = build_ffmpeg_command(
-            video_origin_path, 
+            processing_video_path, 
             output_path, 
             ffmpeg_start_time, 
             ffmpeg_end_time,
@@ -1028,13 +1194,13 @@ def clip_video(
         success = execute_ffmpeg_with_fallback(
             ffmpeg_cmd, 
             timestamp,
-            video_origin_path,
+            processing_video_path,
             output_path,
             ffmpeg_start_time,
             ffmpeg_end_time
         )
         
-        if success:
+        if success and _has_valid_video_output(output_path, context=f"裁剪输出[{timestamp}]"):
             result[_id] = output_path
             success_count += 1
             logger.info(f"✅ [{i}/{total_clips}] 片段裁剪成功: {timestamp}")

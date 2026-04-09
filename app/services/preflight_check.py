@@ -16,6 +16,14 @@ REQUIRED_SCRIPT_KEYS = ["_id", "timestamp", "picture", "narration", "OST"]
 # Script structure validation
 # ---------------------------------------------------------------------------
 
+def _narration_required(item: Dict) -> bool:
+    try:
+        ost = int(item.get("OST", 2) or 2)
+    except Exception:
+        ost = 2
+    return ost in {0, 2}
+
+
 def validate_script_items(script_list: List[Dict]) -> None:
     """Validate that every script item has the required fields."""
     if not script_list:
@@ -24,7 +32,7 @@ def validate_script_items(script_list: List[Dict]) -> None:
         for key in REQUIRED_SCRIPT_KEYS:
             if key not in item:
                 raise PreflightError(f"第 {idx} 个片段缺少字段: {key}")
-        if not str(item.get("narration", "")).strip():
+        if _narration_required(item) and not str(item.get("narration", "")).strip():
             raise PreflightError(f"第 {idx} 个片段 narration 为空")
 
 

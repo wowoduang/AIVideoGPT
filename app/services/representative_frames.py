@@ -5,6 +5,7 @@ import tempfile
 from typing import Dict, List, Optional
 
 from loguru import logger
+from app.services.video_working_copy import ensure_working_video_copy
 
 try:
     import cv2
@@ -41,7 +42,8 @@ def extract_representative_frames_for_scenes(
         output_dir = os.path.join(tempfile.gettempdir(), "videaai_story_frames")
     os.makedirs(output_dir, exist_ok=True)
 
-    cap = cv2.VideoCapture(video_path)
+    processing_video_path = ensure_working_video_copy(video_path, purpose="representative_frames")
+    cap = cv2.VideoCapture(processing_video_path)
     if not cap.isOpened():
         logger.warning("无法打开视频，跳过代表帧抽取")
         return []

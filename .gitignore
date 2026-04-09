@@ -14,6 +14,9 @@ __pycache__
 logs/
 .vscode/
 .qoder/
+.pytest_cache/
+pytest-cache-files-*/
+pytest-of-*/
 
 
 node_modules
@@ -27,16 +30,25 @@ node_modules
 /models/
 ./models/*
 resource/scripts/*.json
-resource/videos/*.mp4
+resource/videos/*
 resource/songs/*.mp3
 resource/songs/*.flac
 resource/fonts/*.ttc
 resource/fonts/*.ttf
 resource/fonts/*.otf
 resource/srt/*.srt
+resource/srt/*_segments.json
+resource/srt/*_review_overrides.json
+resource/srt/*_clean_final_segments.json
 app/models/faster-whisper-large-v2/*
 app/models/faster-whisper-large-v3/*
 app/models/bert/*
+AppData/
+vendor/**/.git/
+vendor/**/.venv/
+vendor/**/.runtime_venv/
+vendor/**/__pycache__/
+vendor/VideoCaptioner/
 
 bug清单.md
 task.md

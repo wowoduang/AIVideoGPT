@@ -23,6 +23,8 @@ import google.generativeai as genai
 from moviepy import VideoFileClip
 
 from app.config import config
+from app.services.subtitle_external import is_external_backend, normalize_external_backend, run_external_subtitle_backend
+from app.services.video_working_copy import ensure_working_video_copy
 from app.utils import utils
 
 
@@ -99,6 +101,9 @@ def _base_dirs() -> List[str]:
 
 
 def _normalize_backend() -> str:
+    external_backend = normalize_external_backend(backend_name)
+    if external_backend:
+        return external_backend
     if backend_name:
         if "sensevoice" in backend_name:
             return "sensevoice"
@@ -122,6 +127,9 @@ def _resolve_runtime_backend(backend_override: Optional[str] = None) -> str:
     value = str(backend_override or "").strip().lower()
     if not value:
         return CURRENT_BACKEND
+    external_backend = normalize_external_backend(value)
+    if external_backend:
+        return external_backend
     if "sensevoice" in value:
         return "sensevoice"
     if "paraformer" in value or "funasr" in value:
@@ -795,9 +803,26 @@ def _create_with_faster_whisper(audio_file: str, subtitle_file: str = ""):
     return subtitle_file if os.path.exists(subtitle_file) else None
 
 
-def create(audio_file, subtitle_file: str = "", backend_override: str = "", model_override: str = "", **kwargs):
+def _create_with_external_backend(video_file: str, audio_file: str, subtitle_file: str, backend: str):
+    if not video_file:
+        logger.warning("外部字幕后端缺少视频路径，无法调用: backend={}", backend)
+        return None
+    return run_external_subtitle_backend(
+        backend,
+        video_file=video_file,
+        audio_file=audio_file,
+        subtitle_file=subtitle_file,
+    )
+
+
+def create(audio_file, subtitle_file: str = "", backend_override: str = "", model_override: str = "", video_file: str = "", **kwargs):
     backend = _resolve_runtime_backend(backend_override)
     logger.info(f"字幕生成后端: requested={backend_override or CURRENT_BACKEND}, resolved={backend}")
+    if is_external_backend(backend):
+        result = _create_with_external_backend(video_file, audio_file, subtitle_file, backend)
+        if result:
+            return result
+        logger.warning("external subtitle backend failed, fallback to native ASR: backend={}", backend)
     if backend in {"sensevoice", "funasr"}:
         result = _create_with_sensevoice(audio_file, subtitle_file)
         if result:
@@ -884,6 +909,7 @@ def extract_audio_and_create_subtitle(video_file: str, subtitle_file: str = "", 
     audio_file = ""
     video = None
     try:
+        processing_video_file = ensure_working_video_copy(video_file, purpose="subtitle_audio_extract")
         video_name = os.path.splitext(os.path.basename(video_file))[0]
         audio_dir = utils.temp_dir("audio_extract")
         os.makedirs(audio_dir, exist_ok=True)
@@ -894,14 +920,21 @@ def extract_audio_and_create_subtitle(video_file: str, subtitle_file: str = "", 
             subtitle_file = os.path.join(subtitle_dir, f"{video_name}.srt")
         extracted = False
         if _ffmpeg_available():
-            extracted = _extract_audio_ffmpeg(video_file, audio_file)
+            extracted = _extract_audio_ffmpeg(processing_video_file, audio_file)
         if not extracted:
-            video = VideoFileClip(video_file)
+            video = VideoFileClip(processing_video_file)
             if video.audio is None:
                 return None
             audio_file = os.path.join(audio_dir, f"{video_name}_speech.wav")
             video.audio.write_audiofile(audio_file, codec="pcm_s16le", ffmpeg_params=["-ac", str(DEFAULT_AUDIO_CHANNELS), "-ar", str(DEFAULT_AUDIO_SAMPLE_RATE)], logger=None)
-        result = create(audio_file, subtitle_file, backend_override=backend_override, model_override=model_override, **kwargs)
+        result = create(
+            audio_file,
+            subtitle_file,
+            backend_override=backend_override,
+            model_override=model_override,
+            video_file=processing_video_file,
+            **kwargs,
+        )
         if result and os.path.exists(result):
             return result
         return None

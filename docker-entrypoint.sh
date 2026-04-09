@@ -92,8 +92,11 @@ start_webui() {
   exec streamlit run webui.py \
     --server.address=0.0.0.0 \
     --server.port=8866 \
+    --server.fileWatcherType=none \
+    --server.runOnSave=false \
     --server.enableCORS=true \
-    --server.maxUploadSize=2048 \
+    --server.maxUploadSize=30720 \
+    --server.maxMessageSize=30720 \
     --server.enableXsrfProtection=false \
     --browser.gatherUsageStats=false \
     --browser.serverAddress=0.0.0.0 \

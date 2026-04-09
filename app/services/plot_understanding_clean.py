@@ -6,11 +6,7 @@ from typing import Dict, List, Sequence
 
 from loguru import logger
 
-try:
-    import requests
-except Exception:  # pragma: no cover
-    requests = None
-
+from app.services.llm_text_completion import call_text_chat_completion
 from app.services.prompts import PromptManager
 
 
@@ -29,28 +25,16 @@ EMOTION_CUES = {
 
 
 def _call_chat_completion(prompt: str, api_key: str = "", base_url: str = "", model: str = "") -> str:
-    if not (requests and api_key and base_url and model):
-        return ""
-    url = base_url.rstrip("/")
-    if not url.endswith("/chat/completions"):
-        url += "/chat/completions"
-    payload = {
-        "model": model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": "你是严格、保守的中文影视剧情理解助手。"},
-            {"role": "user", "content": prompt},
-        ],
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    except Exception as exc:
-        logger.warning("剧情理解 LLM 调用失败，回退规则摘要: {}", exc)
-        return ""
+    return call_text_chat_completion(
+        prompt,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        system_prompt="你是严格、保守的中文影视剧情理解助手。",
+        temperature=0.2,
+        timeout=120,
+        log_label="剧情理解 LLM",
+    )
 
 
 def _extract_json_obj(raw: str):
@@ -134,6 +118,60 @@ def _build_subtitle_timeline_digest(segments: Sequence[Dict], max_chars: int = 2
         stride = max(1, len(windows) // max_windows)
         windows = windows[::stride][:max_windows]
     return "\n".join(windows)
+
+
+def _build_full_subtitle_text(
+    segments: Sequence[Dict],
+    *,
+    max_line_chars: int = 180,
+    max_segments: int = 0,
+) -> str:
+    lines: List[str] = []
+    for idx, seg in enumerate(segments or [], start=1):
+        text = re.sub(r"\s+", " ", str(seg.get("text") or "")).strip()
+        if not text:
+            continue
+        if max_line_chars > 0 and len(text) > max_line_chars:
+            text = text[: max_line_chars - 1].rstrip() + "…"
+        start = _format_ts(float(seg.get("start", 0.0) or 0.0))
+        end = _format_ts(float(seg.get("end", seg.get("start", 0.0)) or 0.0))
+        lines.append(f"{idx}. [{start}-{end}] {text}")
+        if max_segments and len(lines) >= max_segments:
+            break
+    return "\n".join(lines)
+
+
+def _split_subtitle_segments_for_llm(
+    segments: Sequence[Dict],
+    *,
+    max_chars: int = 14000,
+    max_segments: int = 140,
+) -> List[str]:
+    chunks: List[str] = []
+    bucket: List[str] = []
+    bucket_chars = 0
+    bucket_count = 0
+
+    for seg in segments or []:
+        text = re.sub(r"\s+", " ", str(seg.get("text") or "")).strip()
+        if not text:
+            continue
+        start = _format_ts(float(seg.get("start", 0.0) or 0.0))
+        end = _format_ts(float(seg.get("end", seg.get("start", 0.0)) or 0.0))
+        line = f"[{start}-{end}] {text}"
+        projected = bucket_chars + len(line) + 1
+        if bucket and (projected > max_chars or bucket_count >= max_segments):
+            chunks.append("\n".join(bucket))
+            bucket = []
+            bucket_chars = 0
+            bucket_count = 0
+        bucket.append(line)
+        bucket_chars += len(line) + 1
+        bucket_count += 1
+
+    if bucket:
+        chunks.append("\n".join(bucket))
+    return chunks
 
 
 def _key_dialogues(text: str, max_items: int = 2) -> List[str]:
@@ -241,6 +279,7 @@ def build_full_subtitle_understanding(
     model: str = "",
 ) -> Dict:
     digest = _build_subtitle_timeline_digest(subtitle_segments)
+    full_subtitle_text = _build_full_subtitle_text(subtitle_segments)
     fallback = {
         "story_arc": "",
         "prologue_end_time": "",
@@ -252,14 +291,53 @@ def build_full_subtitle_understanding(
         },
         "narrative_risk_flags": [],
         "subtitle_timeline_digest": digest,
+        "subtitle_input_mode": "timeline_digest",
+        "subtitle_chunk_summaries": [],
     }
-    if not (api_key and base_url and model and digest):
+    if not (api_key and model and (digest or full_subtitle_text)):
         return fallback
+
+    chunk_summaries: List[Dict] = []
+    subtitle_input_mode = "full_subtitle_text"
+    prompt_subtitle_text = full_subtitle_text
+    if len(full_subtitle_text) > 18000:
+        subtitle_input_mode = "chunked_full_subtitle"
+        prompt_subtitle_text = ""
+        subtitle_chunks = _split_subtitle_segments_for_llm(subtitle_segments)
+        for idx, chunk_text in enumerate(subtitle_chunks, start=1):
+            chunk_prompt = PromptManager.get_prompt(
+                "movie_story_narration",
+                "subtitle_chunk_understanding",
+                parameters={
+                    "chunk_index": idx,
+                    "chunk_count": len(subtitle_chunks),
+                    "subtitle_chunk_text": chunk_text,
+                },
+            )
+            raw_chunk = _call_chat_completion(chunk_prompt, api_key=api_key, base_url=base_url, model=model)
+            parsed_chunk = _extract_json_obj(raw_chunk)
+            if isinstance(parsed_chunk, dict):
+                parsed_chunk.setdefault("chunk_index", idx)
+                chunk_summaries.append(parsed_chunk)
+            else:
+                chunk_summaries.append(
+                    {
+                        "chunk_index": idx,
+                        "window_summary": chunk_text[:300],
+                        "major_events": [],
+                        "highlight_windows": [],
+                        "risk_flags": ["chunk_parse_failed"],
+                    }
+                )
 
     prompt = PromptManager.get_prompt(
         "movie_story_narration",
-        "full_subtitle_understanding",
-        parameters={"subtitle_timeline_digest": digest},
+        "full_subtitle_understanding_v2",
+        parameters={
+            "subtitle_timeline_digest": digest,
+            "full_subtitle_text": prompt_subtitle_text,
+            "subtitle_chunk_summaries_json": json.dumps(chunk_summaries, ensure_ascii=False, indent=2),
+        },
     )
     raw = _call_chat_completion(prompt, api_key=api_key, base_url=base_url, model=model)
     parsed = _extract_json_obj(raw)
@@ -267,6 +345,8 @@ def build_full_subtitle_understanding(
         merged = dict(fallback)
         merged.update({k: v for k, v in parsed.items() if v not in (None, "", [], {})})
         merged["subtitle_timeline_digest"] = digest
+        merged["subtitle_input_mode"] = subtitle_input_mode
+        merged["subtitle_chunk_summaries"] = chunk_summaries
         return merged
     return fallback
 
@@ -292,6 +372,8 @@ def plan_story_highlights(
     candidates = []
     for pkg in evidence_list:
         text = str(pkg.get("subtitle_text") or pkg.get("main_text_evidence") or "").strip()
+        local_understanding = dict(pkg.get("local_understanding") or {})
+        story_validation = dict(pkg.get("story_validation") or {})
         candidates.append(
             {
                 "segment_id": pkg.get("segment_id"),
@@ -300,14 +382,23 @@ def plan_story_highlights(
                 "plot_function": pkg.get("plot_function"),
                 "importance_level": pkg.get("importance_level"),
                 "boundary_confidence": pkg.get("boundary_confidence"),
-                "validator_status": (pkg.get("story_validation") or {}).get("validator_status", "pass"),
+                "validator_status": story_validation.get("validator_status", "pass"),
                 "raw_voice_retain_suggestion": bool(pkg.get("raw_voice_retain_suggestion")),
                 "need_visual_verify": bool(pkg.get("need_visual_verify")),
-                "text": text[:180],
+                "text": text[:260],
+                "surface_dialogue_meaning": str(pkg.get("surface_dialogue_meaning") or "")[:180],
+                "real_narrative_state": str(pkg.get("real_narrative_state") or "")[:180],
+                "core_event": str(local_understanding.get("core_event") or "")[:120],
+                "emotion": local_understanding.get("emotion") or "",
+                "characters": list(local_understanding.get("characters") or [])[:8],
+                "narrative_risk_flags": list(local_understanding.get("narrative_risk_flags") or [])[:8],
+                "validator_hints": list(story_validation.get("validator_hints") or [])[:6],
+                "raw_voice_keep": bool(story_validation.get("raw_voice_keep")),
+                "visual_summary": [str(item.get("desc") or "")[:60] for item in list(pkg.get("visual_summary") or [])[:4]],
             }
         )
 
-    if not (api_key and base_url and model):
+    if not (api_key and model):
         return fallback
 
     prompt = PromptManager.get_prompt(
@@ -376,7 +467,7 @@ def add_local_understanding(
         llm_data = {}
 
         text = (pkg.get("subtitle_text") or pkg.get("main_text_evidence") or pkg.get("aligned_subtitle_text") or "").strip()
-        if api_key and base_url and model and text:
+        if api_key and model and text:
             prompt = PromptManager.get_prompt(
                 "movie_story_narration",
                 "segment_structuring",

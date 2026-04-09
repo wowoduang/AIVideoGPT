@@ -325,8 +325,11 @@ Environment=PYTHONPATH=${SCRIPT_DIR}
 ExecStart=${VENV_DIR}/bin/streamlit run webui.py \\
     --server.address=${APP_HOST} \\
     --server.port=${APP_PORT} \\
+    --server.fileWatcherType=none \\
+    --server.runOnSave=false \\
     --server.enableCORS=true \\
-    --server.maxUploadSize=2048 \\
+    --server.maxUploadSize=30720 \\
+    --server.maxMessageSize=30720 \\
     --server.enableXsrfProtection=false \\
     --browser.gatherUsageStats=false \\
     --logger.level=info
@@ -449,8 +452,11 @@ start_app() {
     streamlit run webui.py \
         --server.address="$APP_HOST" \
         --server.port="$APP_PORT" \
+        --server.fileWatcherType=none \
+        --server.runOnSave=false \
         --server.enableCORS=true \
-        --server.maxUploadSize=2048 \
+        --server.maxUploadSize=30720 \
+        --server.maxMessageSize=30720 \
         --server.enableXsrfProtection=false \
         --browser.gatherUsageStats=false \
         --logger.level=info

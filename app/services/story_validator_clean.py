@@ -3,39 +3,21 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Sequence
 
-from loguru import logger
-
-try:
-    import requests
-except Exception:  # pragma: no cover
-    requests = None
-
+from app.services.llm_text_completion import call_text_chat_completion
 from app.services.prompts import PromptManager
 
 
 def _call_chat_completion(prompt: str, api_key: str = "", base_url: str = "", model: str = "") -> str:
-    if not (requests and api_key and base_url and model):
-        return ""
-    url = base_url.rstrip("/")
-    if not url.endswith("/chat/completions"):
-        url += "/chat/completions"
-    payload = {
-        "model": model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": "你是严格、保守的影视剧情校核助手。"},
-            {"role": "user", "content": prompt},
-        ],
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    except Exception as exc:
-        logger.warning("剧情校核 LLM 调用失败，回退规则校核: {}", exc)
-        return ""
+    return call_text_chat_completion(
+        prompt,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        system_prompt="你是严格、保守的影视剧情校核助手。",
+        temperature=0.2,
+        timeout=120,
+        log_label="剧情校核 LLM",
+    )
 
 
 def _extract_json_obj(raw: str):
@@ -122,7 +104,7 @@ def validate_story_segments(
         )
 
     llm_reviews = {}
-    if api_key and base_url and model:
+    if api_key and model:
         prompt = PromptManager.get_prompt(
             "movie_story_narration",
             "story_validation",

@@ -405,11 +405,14 @@ def save_clip_video(timestamp: str, origin_video: str, save_dir: str = "") -> st
         # 构建FFmpeg命令 - 使用新的智能编码器选择
         encoder = ffmpeg_utils.get_optimal_ffmpeg_encoder()
 
+        effective_hwaccel_args = [] if "nvenc" in encoder else hwaccel_args
         ffmpeg_cmd = [
-            "ffmpeg", "-y", *hwaccel_args,
+            "ffmpeg", "-y", *effective_hwaccel_args,
+            *ffmpeg_utils.get_resilient_decode_input_args(
+                start_time=ffmpeg_start_time,
+                duration=max(float(duration or 0.0), 0.001),
+            ),
             "-i", origin_video,
-            "-ss", ffmpeg_start_time,
-            "-to", ffmpeg_end_time,
             "-c:v", encoder,
             "-c:a", "aac",
             "-strict", "experimental",

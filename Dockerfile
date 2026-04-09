@@ -87,11 +87,11 @@ RUN mkdir -p storage/temp storage/tasks storage/json storage/narration_scripts s
 USER narratoai
 
 # 暴露端口
-EXPOSE 8501
+EXPOSE 8866
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+    CMD curl -f http://localhost:8866/_stcore/health || exit 1
 
 # 设置入口点
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

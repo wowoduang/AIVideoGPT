@@ -9,6 +9,7 @@ from loguru import logger
 
 from app.services import subtitle
 from app.services.subtitle_normalizer import dump_segments_to_srt, normalize_segments, parse_subtitle_file
+from app.services.video_working_copy import ensure_working_video_copy
 from app.utils import utils
 
 
@@ -66,16 +67,29 @@ def _derive_family_paths(base_srt_path: str) -> Dict[str, str]:
     if not ext:
         ext = ".srt"
         base_srt_path = root + ext
+    explicit_clean = root.endswith("_clean")
+    explicit_raw = root.endswith("_raw")
+    family_root = root
+    if explicit_clean:
+        family_root = root[:-len("_clean")]
+    elif explicit_raw:
+        family_root = root[:-len("_raw")]
     return {
-        "main": base_srt_path,
-        "raw": f"{root}_raw.srt",
-        "clean": f"{root}_clean.srt",
-        "segments": f"{root}_segments.json",
+        "main": f"{family_root}.srt",
+        "raw": base_srt_path if explicit_raw else f"{family_root}_raw.srt",
+        "clean": base_srt_path if explicit_clean else f"{family_root}_clean.srt",
+        "segments": f"{family_root}_segments.json",
     }
 
 
 def _backend_cache_key(backend_override: str = "") -> str:
     value = str(backend_override or getattr(subtitle, "CURRENT_BACKEND", "default")).strip().lower()
+    try:
+        external_backend = subtitle.normalize_external_backend(value)
+    except Exception:
+        external_backend = ""
+    if external_backend:
+        return external_backend
     if "sensevoice" in value:
         return "sensevoice"
     if "whisper" in value:
@@ -214,6 +228,51 @@ def _write_clean_sidecars_for_explicit(subtitle_path: str, normalized: List[Dict
     }
 
 
+def _write_generated_sidecars(subtitle_path: str, normalized: List[Dict]):
+    family = _derive_family_paths(subtitle_path)
+    raw_path = family["raw"]
+    clean_path = family["clean"]
+    segments_path = family["segments"]
+
+    try:
+        if subtitle_path and os.path.exists(subtitle_path) and not os.path.exists(raw_path):
+            shutil.copyfile(subtitle_path, raw_path)
+    except Exception as exc:
+        logger.warning(f"备份 raw_srt 失败: {exc}")
+
+    try:
+        dump_segments_to_srt(normalized, clean_path)
+    except Exception as exc:
+        logger.warning(f"写入 clean_srt 失败: {exc}")
+
+    try:
+        payload = []
+        for idx, seg in enumerate(normalized, start=1):
+            payload.append(
+                {
+                    "id": idx,
+                    "seg_id": seg.get("seg_id") or f"sub_{idx:04d}",
+                    "start": float(seg.get("start", 0.0) or 0.0),
+                    "end": float(seg.get("end", 0.0) or 0.0),
+                    "text": str(seg.get("text", "") or ""),
+                    "source": seg.get("source", "generated_clean"),
+                    "backend": seg.get("backend", ""),
+                    "confidence": seg.get("confidence"),
+                }
+            )
+        os.makedirs(os.path.dirname(segments_path), exist_ok=True)
+        with open(segments_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning(f"写入 subtitle_segments.json 失败: {exc}")
+
+    return {
+        "raw": raw_path if os.path.exists(raw_path) else "",
+        "clean": clean_path if os.path.exists(clean_path) else "",
+        "segments": segments_path if os.path.exists(segments_path) else "",
+    }
+
+
 def build_subtitle_segments(
     video_path: str,
     explicit_subtitle_path: str = "",
@@ -223,6 +282,7 @@ def build_subtitle_segments(
     subtitle_path = explicit_subtitle_path or ""
     source = "none"
     error = ""
+    processing_video_path = video_path
 
     original_subtitle_path = ""
     raw_subtitle_path = ""
@@ -240,6 +300,7 @@ def build_subtitle_segments(
         subtitle_segments_path = family["segments"] if os.path.exists(family["segments"]) else ""
         logger.info(f"使用显式字幕: {subtitle_path} (format={source})")
     else:
+        processing_video_path = ensure_working_video_copy(video_path, purpose="subtitle_generation")
         cache_hash, temp_path, persistent_path = _build_generated_subtitle_paths(video_path, backend_override=backend_override)
         generated_temp_path = temp_path
 
@@ -268,7 +329,7 @@ def build_subtitle_segments(
                 f"(regenerate={regenerate}, backend={_backend_cache_key(backend_override)}, cache_version={AUTO_SUBTITLE_CACHE_VERSION}, cache_hash={cache_hash[:12]})"
             )
             generated = subtitle.extract_audio_and_create_subtitle(
-                video_file=video_path,
+                video_file=processing_video_path,
                 subtitle_file=temp_path,
                 backend_override=backend_override,
             )
@@ -306,6 +367,13 @@ def build_subtitle_segments(
             subtitle_segments_path = sidecars.get("segments") or subtitle_segments_path
             preferred_subtitle_path = clean_subtitle_path or preferred_subtitle_path
         else:
+            generated_base_path = original_subtitle_path or preferred_subtitle_path
+            if generated_base_path:
+                sidecars = _write_generated_sidecars(generated_base_path, segments)
+                raw_subtitle_path = sidecars.get("raw") or raw_subtitle_path
+                clean_subtitle_path = sidecars.get("clean") or clean_subtitle_path
+                subtitle_segments_path = sidecars.get("segments") or subtitle_segments_path
+                preferred_subtitle_path = clean_subtitle_path or preferred_subtitle_path
             try:
                 if clean_subtitle_path:
                     dump_segments_to_srt(segments, clean_subtitle_path)
@@ -343,4 +411,5 @@ def build_subtitle_segments(
         "cache_version": AUTO_SUBTITLE_CACHE_VERSION,
         "backend": _backend_cache_key(backend_override),
         "regenerate": regenerate,
+        "working_video_path": processing_video_path if processing_video_path and os.path.exists(processing_video_path) else "",
     }

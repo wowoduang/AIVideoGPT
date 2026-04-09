@@ -19,6 +19,7 @@ from typing import List, Dict
 from loguru import logger
 from tqdm import tqdm
 
+from app.services.video_working_copy import ensure_working_video_copy
 from app.utils import ffmpeg_utils
 from app.config.ffmpeg_config import FFmpegConfigManager
 
@@ -34,7 +35,8 @@ class VideoProcessor:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
-        self.video_path = video_path
+        self.original_video_path = video_path
+        self.video_path = ensure_working_video_copy(video_path, purpose="keyframe_extraction")
         self.video_info = self._get_video_info()
         self.fps = float(self.video_info.get('fps', 25))
         self.duration = float(self.video_info.get('duration', 0))
@@ -235,7 +237,7 @@ class VideoProcessor:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
-            "-ss", str(timestamp),  # 先定位时间戳
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
             "-vframes", "1",  # 只提取一帧
             "-q:v", "2",  # 高质量
@@ -268,7 +270,7 @@ class VideoProcessor:
         cmd.extend(hw_accel)
 
         cmd.extend([
-            "-ss", str(timestamp),
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
             "-vframes", "1",
             "-q:v", "2",
@@ -296,7 +298,7 @@ class VideoProcessor:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "warning",  # 更详细的日志用于调试
-            "-ss", str(timestamp),
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
             "-vframes", "1",
             "-q:v", "3",  # 稍微降低质量以提高兼容性
@@ -325,7 +327,7 @@ class VideoProcessor:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
-            "-ss", str(timestamp),
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
             "-vframes", "1",
             "-f", "image2",  # 明确指定图片格式
@@ -362,8 +364,8 @@ class VideoProcessor:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
-            "-ss", str(timestamp),  # 把 -ss 放在 -i 后面
             "-vframes", "1",
             "-f", "mjpeg",  # 明确指定 MJPEG 格式
             "-q:v", "5",  # 降低质量要求
@@ -380,8 +382,8 @@ class VideoProcessor:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
+            *ffmpeg_utils.get_resilient_decode_input_args(start_time=timestamp),
             "-i", self.video_path,
-            "-ss", str(timestamp),
             "-vframes", "1",
             "-f", "bmp",
             "-y",

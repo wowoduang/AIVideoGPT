@@ -25,6 +25,42 @@ def _seg_text(seg: Dict) -> str:
     return str(seg.get("text") or seg.get("content") or "").strip()
 
 
+def _sorted_unique_strings(values: Sequence[str]) -> List[str]:
+    return [
+        value
+        for value in dict.fromkeys(str(item or "").strip() for item in (values or []) if str(item or "").strip())
+    ]
+
+
+def _speaker_sequence_from_bucket(bucket: Sequence[Dict]) -> List[str]:
+    return [
+        speaker
+        for speaker in (str(seg.get("speaker", "") or "").strip() for seg in (bucket or []))
+        if speaker
+    ]
+
+
+def _speaker_exchange_pairs(speaker_sequence: Sequence[str]) -> List[str]:
+    compact = [
+        speaker
+        for speaker in (str(item or "").strip() for item in (speaker_sequence or []))
+        if speaker
+    ]
+    if not compact:
+        return []
+
+    turns: List[str] = []
+    for speaker in compact:
+        if not turns or speaker != turns[-1]:
+            turns.append(speaker)
+
+    pairs: List[str] = []
+    for left, right in zip(turns, turns[1:]):
+        if left and right and left != right:
+            pairs.append(f"{left}->{right}")
+    return pairs
+
+
 def _duration(start: float, end: float) -> float:
     return max(float(end or 0.0) - float(start or 0.0), 0.0)
 
@@ -159,6 +195,12 @@ def _merge_micro_chunks(chunks: List[Dict]) -> List[Dict]:
             prev["end"] = chunk["end"]
             prev["subtitle_ids"].extend(chunk.get("subtitle_ids", []))
             prev["subtitle_texts"].extend(chunk.get("subtitle_texts", []))
+            prev["speaker_sequence"] = list(prev.get("speaker_sequence") or []) + list(chunk.get("speaker_sequence") or [])
+            prev["speaker_names"] = _sorted_unique_strings(
+                list(prev.get("speaker_names") or []) + list(chunk.get("speaker_names") or [])
+            )
+            prev["speaker_turns"] = len(list(prev.get("speaker_sequence") or []))
+            prev["exchange_pairs"] = _speaker_exchange_pairs(prev.get("speaker_sequence") or [])
             prev["aligned_subtitle_text"] = " ".join(x for x in prev["subtitle_texts"] if x).strip()
             prev["boundary_reasons"].append("merged_micro_chunk")
         else:
@@ -171,11 +213,19 @@ def _flush_bucket(bucket: List[Dict], texts: List[str], *, boundary_source: str 
     start = float(bucket[0].get("start", 0.0))
     end = float(bucket[-1].get("end", start + 1.0))
     joined = " ".join(x for x in texts if x).strip()
+    speaker_sequence = _speaker_sequence_from_bucket(bucket)
+    speaker_names = _sorted_unique_strings(speaker_sequence)
+    speaker_turns = len(speaker_sequence)
+    exchange_pairs = _speaker_exchange_pairs(speaker_sequence)
     return {
         "start": round(start, 3),
         "end": round(end, 3),
         "subtitle_ids": subtitle_ids,
         "subtitle_texts": texts[:],
+        "speaker_sequence": speaker_sequence,
+        "speaker_names": speaker_names,
+        "speaker_turns": speaker_turns,
+        "exchange_pairs": exchange_pairs,
         "aligned_subtitle_text": joined,
         "subtitle_source": bucket[0].get("subtitle_source", bucket[0].get("source", "generated_srt")),
         "surface_dialogue_meaning": joined[:160],
@@ -442,13 +492,41 @@ def _highlight_priority(chunk: Dict, index: int, total: int) -> float:
     return round(score, 3)
 
 
-def _select_story_highlights(chunks: List[Dict]) -> List[Dict]:
+def _resolve_highlight_selectivity(value: str) -> str:
+    normalized = str(value or "balanced").strip().lower()
+    if normalized in {"loose", "balanced", "strict"}:
+        return normalized
+    return "balanced"
+
+
+def _select_story_highlights(chunks: List[Dict], highlight_selectivity: str = "balanced") -> List[Dict]:
     if not chunks:
         return []
 
+    highlight_selectivity = _resolve_highlight_selectivity(highlight_selectivity)
     total = len(chunks)
     scored: List[Dict] = []
     keep_indices = set()
+    soft_keep_threshold = {
+        "loose": 1.2,
+        "balanced": 1.9,
+        "strict": 2.4,
+    }[highlight_selectivity]
+    should_drop_threshold = {
+        "loose": 0.1,
+        "balanced": 1.0,
+        "strict": 1.3,
+    }[highlight_selectivity]
+    fallback_target = {
+        "loose": min(5, total),
+        "balanced": min(4, total),
+        "strict": min(3, total),
+    }[highlight_selectivity]
+    minimum_selected = {
+        "loose": min(3, total),
+        "balanced": min(3, total),
+        "strict": min(2, total),
+    }[highlight_selectivity]
 
     for idx, chunk in enumerate(chunks):
         current = dict(chunk)
@@ -464,9 +542,9 @@ def _select_story_highlights(chunks: List[Dict]) -> List[Dict]:
             or plot_role in {"twist", "ending"}
             or current.get("raw_voice_retain_suggestion")
         )
-        soft_keep = priority >= 1.9
+        soft_keep = priority >= soft_keep_threshold
         should_drop = (
-            priority < 1.0
+            priority < should_drop_threshold
             and importance == "low"
             and (plot_role == "setup" or block_type == "transition")
         )
@@ -502,8 +580,8 @@ def _select_story_highlights(chunks: List[Dict]) -> List[Dict]:
             chunk["story_drop_reason"] = ""
             selected.append(chunk)
 
-    if len(selected) < min(3, total):
-        fallback = sorted(scored, key=lambda x: x.get("highlight_priority", 0.0), reverse=True)[: min(4, total)]
+    if len(selected) < minimum_selected:
+        fallback = sorted(scored, key=lambda x: x.get("highlight_priority", 0.0), reverse=True)[:fallback_target]
         fallback_ids = {item.get("segment_id") for item in fallback}
         selected = [chunk for chunk in scored if chunk.get("segment_id") in fallback_ids]
         for chunk in selected:
@@ -524,6 +602,7 @@ def build_plot_chunks_from_subtitles(
     target_duration_minutes: int = 8,
     narrative_strategy: str = "chronological",
     accuracy_priority: str = "high",
+    highlight_selectivity: str = "balanced",
     video_candidates: Sequence[Dict] | None = None,
     refine_chunks: bool = True,
 ) -> List[Dict]:
@@ -570,7 +649,7 @@ def build_plot_chunks_from_subtitles(
         narrative_strategy=narrative_strategy,
         accuracy_priority=accuracy_priority,
     )
-    selected_chunks = _select_story_highlights(chunks_raw)
+    selected_chunks = _select_story_highlights(chunks_raw, highlight_selectivity=highlight_selectivity)
     planned = apply_duration_plan(selected_chunks, ChunkPlan(target_duration_minutes, narrative_strategy, accuracy_priority))
     logger.info(
         "剧情块构建完成: %s 个剧情块, target_minutes=%s, video_candidates=%s",

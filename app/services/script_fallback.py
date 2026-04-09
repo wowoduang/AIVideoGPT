@@ -30,14 +30,24 @@ def build_picture_fallback(picture: str, is_last: bool = False) -> str:
     return f"这一段里，{cleaned}。"
 
 
+def _needs_narration(item: Dict) -> bool:
+    try:
+        ost = int(item.get("OST", 2) or 2)
+    except Exception:
+        ost = 2
+    return ost in {0, 2}
+
+
 def fill_missing_narrations(script_items: List[Dict]) -> List[Dict]:
     fixed: List[Dict] = []
     total = len(script_items or [])
     for idx, item in enumerate(script_items or [], start=1):
         new_item = dict(item)
         narration = str(new_item.get("narration", "") or "").strip()
-        if not narration:
+        if not narration and _needs_narration(new_item):
             new_item["narration"] = build_picture_fallback(new_item.get("picture", ""), is_last=idx == total)
+        elif not narration:
+            new_item["narration"] = ""
         fixed.append(new_item)
     return fixed
 

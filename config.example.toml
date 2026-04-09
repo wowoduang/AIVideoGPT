@@ -137,6 +137,31 @@
     num_beams = 3
     repetition_penalty = 10.0
 
+[whisper]
+    # 字幕识别后端，可选 faster-whisper / sensevoice / videocaptioner_shell / videolingo_shell
+    backend = "faster-whisper"
+    model_size = "iic/SenseVoiceSmall"
+    funasr_vad_model = "fsmn-vad"
+    language = "zh"
+    audio_sample_rate = 16000
+    audio_channels = 1
+    audio_bitrate = "32k"
+    audio_filter = "highpass=f=120,lowpass=f=3800,volume=1.8"
+    funasr_batch_size_s = 180
+    funasr_merge_length_s = 15
+    funasr_use_itn = true
+    funasr_max_single_segment_time_ms = 30000
+
+    # 第三方字幕后端 shell 命令模板，可使用这些占位符：
+    # {video_file} {audio_file} {subtitle_file}
+    # {clean_subtitle_file} {raw_subtitle_file} {segments_json_file}
+    # 以及对应带引号版本：{video_file_q} 等
+    videocaptioner_repo_dir = ""
+    videocaptioner_asr = "bijian"
+    videocaptioner_language = "auto"
+    videocaptioner_command = ""
+    videolingo_command = ""
+
 [ui]
     # TTS引擎选择 (edge_tts, azure_speech, soulvoice, tencent_tts, tts_qwen)
     tts_engine = "edge_tts"

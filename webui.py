@@ -1,6 +1,9 @@
-import streamlit as st
 import os
 import sys
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
+os.environ.setdefault("STREAMLIT_SERVER_RUN_ON_SAVE", "false")
+
+import streamlit as st
 from loguru import logger
 from app.config import config
 from app.services import user_settings
@@ -9,7 +12,10 @@ from webui.components import basic_settings, video_settings, audio_settings, sub
 # from webui.utils import cache, file_utils
 from app.utils import utils
 from app.utils import ffmpeg_utils
+from app.utils.streamlit_compat import patch_streamlit_torch_watcher
 from app.models.schema import VideoClipParams, VideoAspect
+
+patch_streamlit_torch_watcher()
 
 
 # 初始化配置 - 必须是第一个 Streamlit 命令

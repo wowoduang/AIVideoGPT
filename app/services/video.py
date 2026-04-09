@@ -387,23 +387,27 @@ def generate_video_v3(
         ffmpeg_params = ['-preset', 'medium', '-crf', '23']
 
     try:
+        logger.info("开始导出视频: {} (编码器: {})", output_path, optimal_encoder)
         final_video.write_videofile(
             output_path,
             codec=optimal_encoder,
             audio_codec='aac',
             fps=video.fps,
-            ffmpeg_params=ffmpeg_params
+            ffmpeg_params=ffmpeg_params,
+            logger=None,
         )
         logger.info(f"视频已导出到: {output_path} (使用编码器: {optimal_encoder})")
     except Exception as e:
         logger.warning(f"使用 {optimal_encoder} 编码器失败: {str(e)}, 尝试软件编码")
         # 降级到软件编码
+        logger.info("开始导出视频: {} (编码器: libx264)", output_path)
         final_video.write_videofile(
             output_path,
             codec='libx264',
             audio_codec='aac',
             fps=video.fps,
-            ffmpeg_params=['-preset', 'medium', '-crf', '23']
+            ffmpeg_params=['-preset', 'medium', '-crf', '23'],
+            logger=None,
         )
         logger.info(f"视频已导出到: {output_path} (使用软件编码)")
 

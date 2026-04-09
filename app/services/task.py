@@ -16,6 +16,7 @@ from app.services import (
     update_script,
     voice,
 )
+from app.services.composition_plan_adapter import composition_plan_to_script_items, is_composition_plan
 from app.services import state as sm
 from app.services.preflight_check import PreflightError, validate_script_items, validate_tts_results
 from app.services.script_fallback import ensure_script_shape
@@ -124,7 +125,12 @@ def _validate_composition_script_quality(list_script):
         end = float(item.get("end", start) or start)
         if end <= start:
             issues.append(f"片段时间非法: {seg_label}")
-        if has_highlight_metadata and not bool(item.get("llm_highlight_selected")) and not highlight_only_mode:
+        if (
+            has_highlight_metadata
+            and not bool(item.get("llm_highlight_selected"))
+            and not bool(item.get("highlight_filter_selected"))
+            and not highlight_only_mode
+        ):
             issues.append(f"脚本包含未通过高光筛选的片段: {seg_label}")
         nv = item.get("narration_validation") or {}
         if nv.get("status") == "reject":
@@ -157,7 +163,8 @@ def _load_and_prepare_script(video_script_path: str, fallback_items=None):
     if normalized_path and path.exists(normalized_path):
         try:
             with open(normalized_path, "r", encoding="utf-8") as f:
-                list_script = json.load(f)
+                payload = json.load(f)
+            list_script = composition_plan_to_script_items(payload) if is_composition_plan(payload) else payload
             return _prepare_script_items(list_script)
         except PreflightError:
             raise

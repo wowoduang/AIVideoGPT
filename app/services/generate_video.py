@@ -385,12 +385,14 @@ def merge_materials(
     
     # 导出最终视频
     try:
+        logger.info("开始导出最终视频: {}", output_path)
         video_clip.write_videofile(
             output_path,
             audio_codec="aac",
             temp_audiofile_path=output_dir,
             threads=threads,
             fps=fps,
+            logger=None,
         )
         logger.success(f"素材合并完成: {output_path}")
     except Exception as e:

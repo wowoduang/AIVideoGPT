@@ -78,6 +78,18 @@ def _resolve_review_mode() -> str:
     return str(st.session_state.get("subtitle_review_mode", "review_suspicious") or "review_suspicious").strip()
 
 
+def _resolve_prologue_strategy() -> str:
+    return str(st.session_state.get("prologue_strategy", "speech_first") or "speech_first").strip()
+
+
+def _resolve_manual_prologue_end_time() -> str:
+    return str(st.session_state.get("manual_prologue_end_time", "") or "").strip()
+
+
+def _resolve_highlight_selectivity() -> str:
+    return str(st.session_state.get("highlight_selectivity", "balanced") or "balanced").strip()
+
+
 def _build_request(params, subtitle_path: str, video_theme: str, temperature: float) -> dict:
     text_provider = config.app.get("text_llm_provider", "gemini").lower()
     return {
@@ -95,9 +107,12 @@ def _build_request(params, subtitle_path: str, video_theme: str, temperature: fl
         "narrative_strategy": st.session_state.get("narrative_strategy", "chronological"),
         "accuracy_priority": st.session_state.get("accuracy_priority", "high"),
         "highlight_only": bool(st.session_state.get("highlight_only_mode", False)),
+        "highlight_selectivity": _resolve_highlight_selectivity(),
         "asr_backend": _resolve_asr_backend(),
         "cache_mode": _resolve_cache_mode(),
         "review_mode": _resolve_review_mode(),
+        "prologue_strategy": _resolve_prologue_strategy(),
+        "manual_prologue_end_time": _resolve_manual_prologue_end_time(),
     }
 
 
@@ -163,9 +178,12 @@ def _run_pipeline_from_request(request: dict, subtitle_path: str, progress_callb
             "narrative_strategy": request["narrative_strategy"],
             "accuracy_priority": request["accuracy_priority"],
             "highlight_only": request["highlight_only"],
+            "highlight_selectivity": request.get("highlight_selectivity", "balanced"),
             "video_title": request["video_theme"],
             "short_name": request["video_theme"],
             "temperature": request["temperature"],
+            "prologue_strategy": request.get("prologue_strategy", "speech_first"),
+            "manual_prologue_end_time": request.get("manual_prologue_end_time", ""),
         },
         progress_callback=progress_callback,
         asr_backend=request.get("asr_backend", ""),

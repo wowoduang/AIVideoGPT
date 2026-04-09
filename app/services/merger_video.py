@@ -15,6 +15,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 from loguru import logger
 
+from app.services.media_duration import inspect_media_file, summarize_media_file
 from app.utils import ffmpeg_utils
 
 
@@ -55,6 +56,19 @@ def check_ffmpeg_installation() -> bool:
     except (subprocess.SubprocessError, FileNotFoundError):
         logger.error("ffmpeg未安装或不在系统PATH中，请安装ffmpeg")
         return False
+
+
+def _remove_file_if_exists(file_path: str) -> None:
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+
+
+def _probe_valid_video(video_path: str, *, include_audio: bool = False):
+    media_info = inspect_media_file(video_path, include_audio=include_audio)
+    return bool(media_info.get("is_valid_video")), media_info
 
 
 def get_hardware_acceleration_option() -> Optional[str]:
@@ -156,6 +170,10 @@ def process_single_video(
         raise FileNotFoundError(f"找不到视频文件: {input_path}")
 
     # 构建基本命令
+    input_valid, input_info = _probe_valid_video(input_path, include_audio=keep_audio)
+    if not input_valid:
+        raise RuntimeError(f"输入视频片段无有效视频流或时长异常: {input_path} | {summarize_media_file(input_info)}")
+
     command = ['ffmpeg', '-y']
 
     # 安全检查：如果在Windows上，则慎用硬件加速
@@ -255,7 +273,11 @@ def process_single_video(
     # 执行命令
     try:
         # logger.info(f"执行FFmpeg命令: {' '.join(command)}")
-        process = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output_valid, output_info = _probe_valid_video(output_path, include_audio=keep_audio)
+        if not output_valid:
+            _remove_file_if_exists(output_path)
+            raise RuntimeError(f"处理后的视频无有效视频流或时长异常: {output_path} | {summarize_media_file(output_info)}")
         # logger.info(f"视频处理成功: {output_path}")
         return output_path
     except subprocess.CalledProcessError as e:
@@ -298,6 +320,10 @@ def process_single_video(
 
                 logger.info("执行软件编码备选方案")
                 subprocess.run(fallback_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                output_valid, output_info = _probe_valid_video(output_path, include_audio=keep_audio)
+                if not output_valid:
+                    _remove_file_if_exists(output_path)
+                    raise RuntimeError(f"软件编码输出无有效视频流或时长异常: {output_path} | {summarize_media_file(output_info)}")
                 logger.info(f"使用软件编码成功处理视频: {output_path}")
                 return output_path
             except subprocess.CalledProcessError as fallback_error:
@@ -314,6 +340,10 @@ def process_single_video(
                         output_path
                     ]
                     subprocess.run(basic_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    output_valid, output_info = _probe_valid_video(output_path, include_audio=False)
+                    if not output_valid:
+                        _remove_file_if_exists(output_path)
+                        raise RuntimeError(f"基础编码输出无有效视频流或时长异常: {output_path} | {summarize_media_file(output_info)}")
                     logger.info(f"使用基本编码参数成功处理视频: {output_path}")
                     return output_path
                 except subprocess.CalledProcessError as basic_error:
@@ -389,8 +419,13 @@ def combine_clip_videos(
             logger.warning(f"视频不存在，跳过: {video_path}")
             continue
 
+        clip_valid, clip_info = _probe_valid_video(video_path, include_audio=True)
+        if not clip_valid:
+            logger.warning(f"视频片段无有效视频流或时长异常，跳过: {video_path} | {summarize_media_file(clip_info)}")
+            continue
+
         # 检查是否有音频流
-        has_audio = check_video_has_audio(video_path)
+        has_audio = bool(clip_info.get("has_audio"))
 
         # 构建视频片段配置
         segment = {
