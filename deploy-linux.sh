@@ -26,8 +26,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/venv"
 PYTHON_CMD=""
 PIP_MIRROR="${PIP_MIRROR:-https://pypi.org/simple/}"
-APP_PORT="${APP_PORT:-8501}"
+APP_PORT="${APP_PORT:-8866}"
 APP_HOST="${APP_HOST:-0.0.0.0}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${SCRIPT_DIR}/../AIVideoGPT-workspace}"
 INSTALL_MODE="${1:-full}"   # full | run | stop | status
 
 # -------------------- 帮助信息 --------------------
@@ -44,8 +45,9 @@ show_help() {
     echo "  status  查看状态: 查看应用运行状态"
     echo ""
     echo "环境变量:"
-    echo "  APP_PORT=8501      应用端口（默认8501）"
+    echo "  APP_PORT=8866      应用端口（默认8866）"
     echo "  APP_HOST=0.0.0.0   监听地址（默认0.0.0.0）"
+    echo "  WORKSPACE_ROOT=DIR 工作区目录（默认 ../AIVideoGPT-workspace）"
     echo "  PIP_MIRROR=URL     pip镜像源（默认官方源）"
     echo ""
     echo "示例:"
@@ -270,18 +272,28 @@ setup_directories() {
     step "创建目录结构"
 
     local dirs=(
-        "storage/temp"
-        "storage/tasks"
-        "storage/json"
-        "storage/narration_scripts"
-        "storage/drama_analysis"
+        "temp"
+        "cache"
+        "runtime"
+        "state"
+        "tasks"
+        "models"
+        "videos"
+        "subtitles"
+        "scripts"
+        "fonts"
+        "songs"
+        "analysis"
+        "analysis/json"
+        "analysis/narration_scripts"
+        "analysis/drama_analysis"
     )
 
     for d in "${dirs[@]}"; do
-        mkdir -p "$SCRIPT_DIR/$d"
+        mkdir -p "$WORKSPACE_ROOT/$d"
     done
 
-    ok "目录结构创建完成"
+    ok "工作区目录创建完成: $WORKSPACE_ROOT"
 }
 
 # -------------------- 初始化配置 --------------------

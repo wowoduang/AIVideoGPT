@@ -18,10 +18,9 @@ set "CYAN=[96m"
 set "NC=[0m"
 
 :: -------------------- 全局变量 --------------------
-set "APP_PORT=8501"
-set "SCRIPT_DIR=%~dp0"
-:: 去掉末尾的反斜杠
-if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+set "APP_PORT=8866"
+for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
+if "%WORKSPACE_ROOT%"=="" for %%I in ("%SCRIPT_DIR%\..\AIVideoGPT-workspace") do set "WORKSPACE_ROOT=%%~fI"
 set "INSTALL_MODE=%~1"
 if "%INSTALL_MODE%"=="" set "INSTALL_MODE=full"
 
@@ -163,16 +162,27 @@ goto :eof
 
 :: -------------------- 创建目录 --------------------
 :setup_directories
-echo %GREEN%[信息]%NC% 创建存储目录...
+echo %GREEN%[信息]%NC% 创建工作区目录...
 
-if not exist "%SCRIPT_DIR%\storage\temp" mkdir "%SCRIPT_DIR%\storage\temp"
-if not exist "%SCRIPT_DIR%\storage\tasks" mkdir "%SCRIPT_DIR%\storage\tasks"
-if not exist "%SCRIPT_DIR%\storage\json" mkdir "%SCRIPT_DIR%\storage\json"
-if not exist "%SCRIPT_DIR%\storage\narration_scripts" mkdir "%SCRIPT_DIR%\storage\narration_scripts"
-if not exist "%SCRIPT_DIR%\storage\drama_analysis" mkdir "%SCRIPT_DIR%\storage\drama_analysis"
+if not exist "%WORKSPACE_ROOT%" mkdir "%WORKSPACE_ROOT%"
+if not exist "%WORKSPACE_ROOT%\temp" mkdir "%WORKSPACE_ROOT%\temp"
+if not exist "%WORKSPACE_ROOT%\cache" mkdir "%WORKSPACE_ROOT%\cache"
+if not exist "%WORKSPACE_ROOT%\runtime" mkdir "%WORKSPACE_ROOT%\runtime"
+if not exist "%WORKSPACE_ROOT%\state" mkdir "%WORKSPACE_ROOT%\state"
+if not exist "%WORKSPACE_ROOT%\tasks" mkdir "%WORKSPACE_ROOT%\tasks"
+if not exist "%WORKSPACE_ROOT%\models" mkdir "%WORKSPACE_ROOT%\models"
+if not exist "%WORKSPACE_ROOT%\videos" mkdir "%WORKSPACE_ROOT%\videos"
+if not exist "%WORKSPACE_ROOT%\subtitles" mkdir "%WORKSPACE_ROOT%\subtitles"
+if not exist "%WORKSPACE_ROOT%\scripts" mkdir "%WORKSPACE_ROOT%\scripts"
+if not exist "%WORKSPACE_ROOT%\fonts" mkdir "%WORKSPACE_ROOT%\fonts"
+if not exist "%WORKSPACE_ROOT%\songs" mkdir "%WORKSPACE_ROOT%\songs"
+if not exist "%WORKSPACE_ROOT%\analysis" mkdir "%WORKSPACE_ROOT%\analysis"
+if not exist "%WORKSPACE_ROOT%\analysis\json" mkdir "%WORKSPACE_ROOT%\analysis\json"
+if not exist "%WORKSPACE_ROOT%\analysis\narration_scripts" mkdir "%WORKSPACE_ROOT%\analysis\narration_scripts"
+if not exist "%WORKSPACE_ROOT%\analysis\drama_analysis" mkdir "%WORKSPACE_ROOT%\analysis\drama_analysis"
 if not exist "%SCRIPT_DIR%\resource" mkdir "%SCRIPT_DIR%\resource"
 
-echo %GREEN%[成功]%NC% 目录结构就绪
+echo %GREEN%[成功]%NC% 工作区目录就绪: %WORKSPACE_ROOT%
 goto :eof
 
 :: -------------------- 构建镜像 --------------------
@@ -204,6 +214,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo %GREEN%[成功]%NC% 容器已启动
+echo %GREEN%[信息]%NC% 工作区目录: %WORKSPACE_ROOT%
 goto :eof
 
 :: -------------------- 等待服务就绪 --------------------
@@ -244,6 +255,7 @@ echo %GREEN%    NarratoAI 部署完成！%NC%
 echo %GREEN%============================================%NC%
 echo.
 echo   访问地址: http://localhost:%APP_PORT%
+echo   工作区目录: %WORKSPACE_ROOT%
 echo.
 echo   常用命令:
 echo     查看状态: deploy-windows-docker.bat status

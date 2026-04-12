@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 from loguru import logger
 
@@ -83,6 +83,100 @@ def _parse_ts(raw: str) -> float | None:
         return None
     hh, mm, ss, ms = m.groups()
     return int(hh) * 3600 + int(mm) * 60 + int(ss) + int((ms or "0").ljust(3, "0")) / 1000.0
+
+
+def _coerce_ts(raw: Any) -> float | None:
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, (int, float)):
+        return round(float(raw), 3)
+    return _parse_ts(str(raw))
+
+
+def _normalize_highlight_windows(
+    items: Sequence[Dict] | None,
+    *,
+    default_category: str = "",
+    default_importance: str = "medium",
+    default_raw_voice_priority: str = "low",
+) -> List[Dict]:
+    normalized: List[Dict] = []
+    seen = set()
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        start = _coerce_ts(item.get("start"))
+        end = _coerce_ts(item.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        category = str(item.get("category") or item.get("label") or default_category or "信息揭露").strip()
+        importance = str(item.get("importance") or default_importance or "medium").strip().lower()
+        if importance not in {"high", "medium", "low"}:
+            importance = default_importance
+        raw_voice_priority = str(
+            item.get("raw_voice_priority") or default_raw_voice_priority or "low"
+        ).strip().lower()
+        if raw_voice_priority not in {"high", "medium", "low"}:
+            raw_voice_priority = default_raw_voice_priority
+        reason = str(item.get("reason") or item.get("label") or category or "剧情高光候选").strip()
+        dedupe_key = (round(start, 3), round(end, 3), category, importance, raw_voice_priority, reason)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized.append(
+            {
+                "start": _format_ts(start),
+                "end": _format_ts(end),
+                "category": category,
+                "importance": importance,
+                "raw_voice_priority": raw_voice_priority,
+                "reason": reason,
+            }
+        )
+    normalized.sort(key=lambda x: (_coerce_ts(x.get("start")) or 0.0, _coerce_ts(x.get("end")) or 0.0))
+    return normalized
+
+
+def _derive_highlight_windows(parsed: Dict | None, chunk_summaries: Sequence[Dict] | None) -> tuple[List[Dict], str]:
+    parsed = parsed or {}
+
+    direct_windows = _normalize_highlight_windows(parsed.get("highlight_windows"))
+    if direct_windows:
+        return direct_windows, "llm_highlight_windows"
+
+    turning_point_windows = _normalize_highlight_windows(
+        parsed.get("major_turning_points"),
+        default_importance="high",
+        default_raw_voice_priority="medium",
+    )
+    if turning_point_windows:
+        return turning_point_windows, "llm_turning_points_fallback"
+
+    chunk_highlight_windows: List[Dict] = []
+    for chunk in chunk_summaries or []:
+        chunk_highlight_windows.extend(
+            _normalize_highlight_windows(
+                chunk.get("highlight_windows"),
+                default_importance="medium",
+                default_raw_voice_priority="medium",
+            )
+        )
+    if chunk_highlight_windows:
+        return chunk_highlight_windows, "chunk_summaries_fallback"
+
+    chunk_major_event_windows: List[Dict] = []
+    for chunk in chunk_summaries or []:
+        chunk_major_event_windows.extend(
+            _normalize_highlight_windows(
+                chunk.get("major_events"),
+                default_importance="medium",
+                default_raw_voice_priority="low",
+            )
+        )
+    if chunk_major_event_windows:
+        return chunk_major_event_windows, "chunk_major_events_fallback"
+
+    return [], "none"
 
 
 def _build_subtitle_timeline_digest(segments: Sequence[Dict], max_chars: int = 220, max_windows: int = 180) -> str:
@@ -341,14 +435,31 @@ def build_full_subtitle_understanding(
     )
     raw = _call_chat_completion(prompt, api_key=api_key, base_url=base_url, model=model)
     parsed = _extract_json_obj(raw)
+    merged = dict(fallback)
+    merged["subtitle_timeline_digest"] = digest
+    merged["subtitle_input_mode"] = subtitle_input_mode
+    merged["subtitle_chunk_summaries"] = chunk_summaries
     if isinstance(parsed, dict):
-        merged = dict(fallback)
         merged.update({k: v for k, v in parsed.items() if v not in (None, "", [], {})})
-        merged["subtitle_timeline_digest"] = digest
-        merged["subtitle_input_mode"] = subtitle_input_mode
-        merged["subtitle_chunk_summaries"] = chunk_summaries
-        return merged
-    return fallback
+        merged["subtitle_understanding_status"] = "ok"
+    else:
+        merged["subtitle_understanding_status"] = "parse_failed"
+        logger.warning(
+            "整字幕剧情理解解析失败: input_mode={}, chunk_summaries={}, raw_preview={}",
+            subtitle_input_mode,
+            len(chunk_summaries),
+            str(raw or "").replace("\n", " ")[:240],
+        )
+
+    highlight_windows, highlight_source = _derive_highlight_windows(parsed if isinstance(parsed, dict) else {}, chunk_summaries)
+    if highlight_windows:
+        merged["highlight_windows"] = highlight_windows
+        merged["highlight_windows_source"] = highlight_source
+        if merged.get("subtitle_understanding_status") == "parse_failed":
+            merged["subtitle_understanding_status"] = f"parse_failed_{highlight_source}"
+    else:
+        merged["highlight_windows_source"] = highlight_source
+    return merged
 
 
 def plan_story_highlights(

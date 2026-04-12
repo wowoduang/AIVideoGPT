@@ -96,6 +96,15 @@ class CandidateClip(TypedDict, total=False):
     relation_score: float
     narrative_overview_score: float
     group_reaction_score: float
+    peak_window_start: float
+    peak_window_end: float
+    peak_window_duration: float
+    peak_window_strength: float
+    peak_window_text_score: float
+    peak_window_dialogue_score: float
+    peak_window_payoff_score: float
+    peak_window_character_score: float
+    peak_window_clip_ids: List[str]
     speaker_turns: int
     solo_focus_score: float
     dialogue_exchange_score: float
@@ -147,6 +156,15 @@ class SelectedClip(TypedDict, total=False):
     relation_score: float
     narrative_overview_score: float
     group_reaction_score: float
+    peak_window_start: float
+    peak_window_end: float
+    peak_window_duration: float
+    peak_window_strength: float
+    peak_window_text_score: float
+    peak_window_dialogue_score: float
+    peak_window_payoff_score: float
+    peak_window_character_score: float
+    peak_window_clip_ids: List[str]
     speaker_turns: int
     solo_focus_score: float
     dialogue_exchange_score: float

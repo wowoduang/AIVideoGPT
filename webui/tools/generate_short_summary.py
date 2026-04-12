@@ -135,6 +135,10 @@ def _save_pipeline_success(pipeline_result: dict):
         st.session_state["subtitle_first_audit_path"] = pipeline_result.get("audit_path")
     st.session_state["movie_story_plot_chunks"] = pipeline_result.get("plot_chunks", [])
     st.session_state["movie_story_frame_records"] = pipeline_result.get("frame_records", [])
+    st.session_state["movie_story_highlight_frame_records"] = pipeline_result.get("highlight_frame_records", [])
+    st.session_state["subtitle_first_highlight_narration_segments"] = pipeline_result.get("highlight_narration_segments", [])
+    if pipeline_result.get("highlight_narration_segments_path"):
+        st.session_state["subtitle_first_highlight_narration_segments_path"] = pipeline_result.get("highlight_narration_segments_path")
 
     final_path = (
         pipeline_result.get("generated_saved_subtitle_path")

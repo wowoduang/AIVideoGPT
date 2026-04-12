@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from app.models import const
 from app.utils import check_script
+from app.utils import workspace
 from app.services import material
 
 urllib3.disable_warnings()
@@ -70,51 +71,44 @@ def get_uuid(remove_hyphen: bool = False):
 
 
 def root_dir():
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    return workspace.project_root()
 
 
 def storage_dir(sub_dir: str = "", create: bool = False):
-    d = os.path.join(root_dir(), "storage")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if create and not os.path.exists(d):
-        os.makedirs(d)
+    return workspace.storage_dir(sub_dir=sub_dir, create=create)
 
-    return d
+
+def workspace_dir(sub_dir: str = "", create: bool = False):
+    return workspace.workspace_dir(sub_dir=sub_dir, create=create)
 
 
 def resource_dir(sub_dir: str = ""):
-    d = os.path.join(root_dir(), "resource")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    return d
+    return workspace.resource_dir(sub_dir=sub_dir)
 
 
 def task_dir(sub_dir: str = ""):
-    d = os.path.join(storage_dir(), "tasks")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return workspace.task_dir(sub_dir=sub_dir, create=True)
+
+
+def model_dir(sub_dir: str = ""):
+    return workspace.model_dir(sub_dir=sub_dir, create=True)
+
+
+def analysis_dir(sub_dir: str = ""):
+    return workspace.analysis_dir(sub_dir=sub_dir, create=True)
+
+
+def _workspace_bucket_dir(name: str, sub_dir: str = ""):
+    relative = os.path.join(name, sub_dir) if sub_dir else name
+    return storage_dir(relative, create=True)
 
 
 def font_dir(sub_dir: str = ""):
-    d = resource_dir("fonts")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return _workspace_bucket_dir("fonts", sub_dir)
 
 
 def song_dir(sub_dir: str = ""):
-    d = resource_dir("songs")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return _workspace_bucket_dir("songs", sub_dir)
 
 
 def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
@@ -159,21 +153,12 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
 
 
 def public_dir(sub_dir: str = ""):
-    d = resource_dir(f"public")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    relative = os.path.join("public", sub_dir) if sub_dir else "public"
+    return workspace.resource_dir(relative, create=True)
 
 
 def srt_dir(sub_dir: str = ""):
-    d = resource_dir(f"srt")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return subtitle_dir(sub_dir)
 
 
 def run_in_background(func, *args, **kwargs):
@@ -308,30 +293,15 @@ def parse_extension(filename):
 
 
 def script_dir(sub_dir: str = ""):
-    d = resource_dir(f"scripts")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return _workspace_bucket_dir("scripts", sub_dir)
 
 
 def video_dir(sub_dir: str = ""):
-    d = resource_dir(f"videos")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return _workspace_bucket_dir("videos", sub_dir)
 
 
 def subtitle_dir(sub_dir: str = ""):
-    d = resource_dir(f"srt")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return _workspace_bucket_dir("subtitles", sub_dir)
 
 
 def split_timestamp(timestamp):
@@ -562,12 +532,27 @@ def temp_dir(sub_dir: str = ""):
     Returns:
         str: 临时文件目录路径
     """
-    d = os.path.join(storage_dir(), "temp")
-    if sub_dir:
-        d = os.path.join(d, sub_dir)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    return d
+    return workspace.temp_dir(sub_dir=sub_dir, create=True)
+
+
+def cache_dir(sub_dir: str = ""):
+    return workspace.cache_dir(sub_dir=sub_dir, create=True)
+
+
+def runtime_dir(sub_dir: str = ""):
+    return workspace.runtime_dir(sub_dir=sub_dir, create=True)
+
+
+def state_dir(sub_dir: str = ""):
+    return workspace.state_dir(sub_dir=sub_dir, create=True)
+
+
+def vendor_dir(sub_dir: str = ""):
+    return workspace.vendor_dir(sub_dir=sub_dir)
+
+
+def tools_dir(sub_dir: str = ""):
+    return workspace.tools_dir(sub_dir=sub_dir, create=True)
 
 
 def clear_keyframes_cache(video_path: str = None):
@@ -603,7 +588,7 @@ def init_resources():
     """初始化资源文件"""
     try:
         # 创建字体目录
-        font_dir = os.path.join(root_dir(), "resource", "fonts")
+        font_dir = globals()["font_dir"]()
         os.makedirs(font_dir, exist_ok=True)
 
         # 检查字体文件

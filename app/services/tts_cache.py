@@ -16,9 +16,7 @@ CACHE_DIR_NAME = "tts_cache"
 
 
 def _cache_root() -> str:
-    root = os.path.join(utils.storage_dir(), CACHE_DIR_NAME)
-    os.makedirs(root, exist_ok=True)
-    return root
+    return utils.cache_dir(CACHE_DIR_NAME)
 
 
 def build_tts_cache_key(item: Dict, voice_name: str, voice_rate: float, voice_pitch: float, tts_engine: str) -> str:

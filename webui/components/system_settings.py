@@ -1,45 +1,40 @@
 import streamlit as st
-import os
-import shutil
-from loguru import logger
 
-from app.utils.utils import storage_dir
+from app.utils import utils
+from webui.services.system_actions import clear_directory, get_workspace_layout_rows
+from webui.utils import local_api_client
 
 
-def clear_directory(dir_path, tr):
-    """清理指定目录"""
-    if os.path.exists(dir_path):
-        try:
-            for item in os.listdir(dir_path):
-                item_path = os.path.join(dir_path, item)
-                try:
-                    if os.path.isfile(item_path):
-                        os.unlink(item_path)
-                    elif os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
-                except Exception as e:
-                    logger.error(f"Failed to delete {item_path}: {e}")
-            st.success(tr("Directory cleared"))
-            logger.info(f"Cleared directory: {dir_path}")
-        except Exception as e:
-            st.error(f"{tr('Failed to clear directory')}: {str(e)}")
-            logger.error(f"Failed to clear directory {dir_path}: {e}")
+def _render_clear_result(result, tr):
+    status, message = result
+    translated = tr(message) if message in {"Directory cleared", "Directory does not exist"} else message
+    if status == "success":
+        st.success(translated)
+    elif status == "warning":
+        st.warning(translated)
     else:
-        st.warning(tr("Directory does not exist"))
+        st.error(translated)
+
 
 def render_system_panel(tr):
-    """渲染系统设置面板"""
     with st.expander(tr("System settings"), expanded=False):
+        st.caption(f"Workspace: {utils.workspace_dir()}")
+        st.caption(f"Local API: {local_api_client.get_local_api_base_url()}")
+        with st.container(border=True):
+            st.caption(tr("Workspace layout"))
+            for relative_path, absolute_path in get_workspace_layout_rows():
+                st.caption(f"{relative_path}: {absolute_path}")
+
         col1, col2, col3 = st.columns(3)
-                
+
         with col1:
-            if st.button(tr("Clear frames"), use_container_width=True):
-                clear_directory(os.path.join(storage_dir(), "temp/keyframes"), tr)
-                
+            if st.button(tr("Clear temp"), use_container_width=True):
+                _render_clear_result(clear_directory(utils.temp_dir()), tr)
+
         with col2:
-            if st.button(tr("Clear clip videos"), use_container_width=True):
-                clear_directory(os.path.join(storage_dir(), "temp/clip_video"), tr)
-                
+            if st.button(tr("Clear cache"), use_container_width=True):
+                _render_clear_result(clear_directory(utils.cache_dir()), tr)
+
         with col3:
             if st.button(tr("Clear tasks"), use_container_width=True):
-                clear_directory(os.path.join(storage_dir(), "tasks"), tr)
+                _render_clear_result(clear_directory(utils.task_dir()), tr)

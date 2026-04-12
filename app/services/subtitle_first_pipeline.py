@@ -26,11 +26,64 @@ from app.services.subtitle_pipeline import build_subtitle_segments
 from app.utils import utils
 
 
+_TAIL_PREVIEW_CUES = {
+    "下集预告": 6.0,
+    "下期预告": 6.0,
+    "下回预告": 6.0,
+    "次集预告": 6.0,
+    "下周预告": 5.5,
+    "精彩预告": 5.0,
+    "未完待续": 4.8,
+    "敬请期待": 4.2,
+    "欲知后事如何": 5.2,
+    "下一集": 2.4,
+    "下集": 1.6,
+    "下期": 1.6,
+    "下回": 1.6,
+    "预告": 2.4,
+}
+_TAIL_CREDITS_CUES = {
+    "片尾曲": 6.0,
+    "片尾": 3.5,
+    "主题曲": 2.6,
+    "职员表": 5.0,
+    "演职员": 5.0,
+    "演职员表": 5.4,
+    "领衔主演": 2.4,
+    "主演": 1.5,
+    "特别出演": 2.2,
+    "友情出演": 2.2,
+    "联合主演": 2.2,
+    "出品人": 1.8,
+    "总制片人": 2.0,
+    "制片人": 1.6,
+    "总监制": 2.0,
+    "监制": 1.4,
+    "导演": 1.4,
+    "编剧": 1.4,
+    "摄影指导": 1.6,
+    "美术指导": 1.6,
+    "后期制作": 1.6,
+    "鸣谢": 2.0,
+}
+_TAIL_BRACKET_RE = re.compile(
+    r"^[\[\(【（]?(?:片尾曲|片尾|下集预告|下期预告|下回预告|精彩预告|预告)[\]\)】）]?$",
+    re.IGNORECASE,
+)
+
+
 _PROLOGUE_CUE_ONLY_RE = re.compile(
     r"^\s*[\[\(]?\s*(?:bgm|music|applause|laughter|laughing|sigh|crying|phone ringing|ringtone|"
     r"音乐|配乐|掌声|笑声|哭声|叹气|电话铃声)\s*[\]\)]?\s*$",
     re.IGNORECASE,
 )
+
+
+_SCENE_ALIGN_NARRATION_WINDOW_SECONDS = 1.2
+_SCENE_ALIGN_RAW_VOICE_WINDOW_SECONDS = 4.0
+_HIGHLIGHT_SNAP_WINDOW_DEFAULT_SECONDS = 1.5
+_HIGHLIGHT_SNAP_WINDOW_HIGH_SECONDS = 2.5
+_HIGHLIGHT_SNAP_WINDOW_RAW_VOICE_SECONDS = 4.0
 
 
 def run_subtitle_first_pipeline(
@@ -173,22 +226,32 @@ def _align_range_to_scene_group(
     lead_window: float,
     tail_window: float,
     hard_start_floor: float | None = None,
+    hard_end_ceiling: float | None = None,
 ) -> Dict[str, Any]:
-    def _apply_start_floor(result: Dict[str, Any]) -> Dict[str, Any]:
-        if hard_start_floor is None:
-            return result
-
-        floor = round(float(hard_start_floor or 0.0), 3)
+    def _apply_hard_bounds(result: Dict[str, Any]) -> Dict[str, Any]:
         cur = dict(result)
-        cur["start"] = round(max(float(cur.get("start", semantic_start) or semantic_start), floor), 3)
-        cur["end"] = round(float(cur.get("end", cur["start"]) or cur["start"]), 3)
+        floor = round(float(hard_start_floor or 0.0), 3) if hard_start_floor is not None else None
+        ceiling = round(float(hard_end_ceiling or 0.0), 3) if hard_end_ceiling is not None else None
+        cur["start"] = round(float(cur.get("start", semantic_start) or semantic_start), 3)
+        cur["end"] = round(float(cur.get("end", semantic_end) or semantic_end), 3)
+        if floor is not None:
+            cur["start"] = round(max(cur["start"], floor), 3)
+        if ceiling is not None:
+            cur["end"] = round(min(cur["end"], ceiling), 3)
         if cur["end"] <= cur["start"]:
-            cur["end"] = round(max(cur["start"] + 0.5, semantic_end), 3)
+            fallback_end = semantic_end
+            if ceiling is not None:
+                fallback_end = min(fallback_end, ceiling)
+            cur["end"] = round(max(cur["start"] + 0.5, fallback_end), 3)
 
         clipped_ranges = []
         for left, right in cur.get("scene_group_ranges") or []:
-            clipped_left = round(max(float(left or 0.0), floor), 3)
+            clipped_left = round(float(left or 0.0), 3)
             clipped_right = round(float(right or clipped_left), 3)
+            if floor is not None:
+                clipped_left = round(max(clipped_left, floor), 3)
+            if ceiling is not None:
+                clipped_right = round(min(clipped_right, ceiling), 3)
             if clipped_right > clipped_left:
                 clipped_ranges.append([clipped_left, clipped_right])
 
@@ -205,7 +268,7 @@ def _align_range_to_scene_group(
 
     intervals = _build_scene_intervals(cut_points)
     if not intervals:
-        return _apply_start_floor({
+        return _apply_hard_bounds({
             "start": semantic_start,
             "end": semantic_end,
             "scene_group_count": 0,
@@ -225,7 +288,7 @@ def _align_range_to_scene_group(
         snapped_end, _ = _snap_time_to_cut(semantic_end, cut_points, window=max(tail_window, 2.0), direction="forward")
         if snapped_end <= snapped_start:
             snapped_end = round(max(snapped_start + 0.5, semantic_end), 3)
-        return _apply_start_floor({
+        return _apply_hard_bounds({
             "start": snapped_start,
             "end": snapped_end,
             "scene_group_count": 0,
@@ -235,7 +298,7 @@ def _align_range_to_scene_group(
 
     aligned_start = round(min(x[0] for x in overlapping), 3)
     aligned_end = round(max(x[1] for x in overlapping), 3)
-    return _apply_start_floor({
+    return _apply_hard_bounds({
         "start": aligned_start,
         "end": aligned_end,
         "scene_group_count": len(overlapping),
@@ -248,8 +311,8 @@ def _align_script_items_to_scene_cuts(
     script_items: List[Dict],
     cut_points: List[float],
     *,
-    narration_window: float = 2.0,
-    raw_voice_window: float = 8.0,
+    narration_window: float = _SCENE_ALIGN_NARRATION_WINDOW_SECONDS,
+    raw_voice_window: float = _SCENE_ALIGN_RAW_VOICE_WINDOW_SECONDS,
 ) -> List[Dict]:
     if not script_items:
         return []
@@ -261,12 +324,19 @@ def _align_script_items_to_scene_cuts(
         end = float(cur.get("end", start) or start)
         ost = int(cur.get("OST", 2) or 2)
         hard_start_floor = None
+        hard_end_ceiling = None
         if cur.get("prologue_end") is not None and (
             cur.get("prologue_trimmed")
             or cur.get("prologue_original_before_prologue_end")
             or cur.get("before_prologue_end")
         ):
             hard_start_floor = float(cur.get("prologue_end", 0.0) or 0.0)
+        if cur.get("story_end") is not None and (
+            cur.get("story_end_trimmed")
+            or cur.get("story_end_original_after_story_end")
+            or cur.get("after_story_end")
+        ):
+            hard_end_ceiling = float(cur.get("story_end", 0.0) or 0.0)
         semantic_start = round(start, 3)
         semantic_end = round(end, 3)
         cur["semantic_start"] = semantic_start
@@ -281,6 +351,7 @@ def _align_script_items_to_scene_cuts(
                 lead_window=raw_voice_window,
                 tail_window=raw_voice_window,
                 hard_start_floor=hard_start_floor,
+                hard_end_ceiling=hard_end_ceiling,
             )
             snapped_start = float(grouped["start"])
             snapped_end = float(grouped["end"])
@@ -302,6 +373,7 @@ def _align_script_items_to_scene_cuts(
                 lead_window=narration_window,
                 tail_window=narration_window,
                 hard_start_floor=hard_start_floor,
+                hard_end_ceiling=hard_end_ceiling,
             )
             snapped_start = float(grouped["start"])
             snapped_end = float(grouped["end"])
@@ -360,6 +432,19 @@ def _merge_highlight_segments(highlights: List[Dict[str, Any]], gap_threshold: f
         prev["evidence_ids"] = sorted({*(prev.get("evidence_ids") or []), *(current.get("evidence_ids") or [])})
         prev["highlight_reasons"] = sorted({*(prev.get("highlight_reasons") or []), *(current.get("highlight_reasons") or [])})
         prev["raw_voice_retain"] = bool(prev.get("raw_voice_retain") or current.get("raw_voice_retain"))
+        left_story_end = prev.get("story_end")
+        right_story_end = current.get("story_end")
+        if left_story_end is None:
+            prev["story_end"] = right_story_end
+        elif right_story_end is None:
+            prev["story_end"] = left_story_end
+        else:
+            prev["story_end"] = round(min(float(left_story_end), float(right_story_end)), 3)
+        prev["story_end_trimmed"] = bool(prev.get("story_end_trimmed") or current.get("story_end_trimmed"))
+        prev["story_end_original_after_story_end"] = bool(
+            prev.get("story_end_original_after_story_end") or current.get("story_end_original_after_story_end")
+        )
+        prev["after_story_end"] = bool(prev.get("after_story_end") or current.get("after_story_end"))
         prev["boundary_confidence"] = "high" if "high" in {str(prev.get("boundary_confidence") or ""), str(current.get("boundary_confidence") or "")} else str(prev.get("boundary_confidence") or current.get("boundary_confidence") or "medium")
         prev["timestamp"] = f"{utils.format_time(float(prev['start']))}-{utils.format_time(float(prev['end']))}"
         prev["semantic_timestamp"] = f"{utils.format_time(float(prev['semantic_start']))}-{utils.format_time(float(prev['semantic_end']))}"
@@ -395,6 +480,8 @@ def _extract_story_highlights(
 
         if pkg.get("before_prologue_end"):
             continue
+        if pkg.get("after_story_end"):
+            continue
 
         if validator_status == "risky" and (
             importance == "low" or highlight_selectivity != "loose"
@@ -402,17 +489,25 @@ def _extract_story_highlights(
             continue
         if highlight_selectivity == "loose" and score >= min_score:
             score = max(score, 1.6)
-        if score < 1.6 and importance != "high" and plot_function not in {"反转", "情感爆发", "结局收束", "冲突升级"}:
+        if score < 1.6 and importance != "high" and plot_function not in {"\u53cd\u8f6c", "\u60c5\u611f\u7206\u53d1", "\u7ed3\u5c40\u6536\u675f", "\u51b2\u7a81\u5347\u7ea7"}:
             continue
 
         semantic_start = round(float(pkg.get("start", 0.0) or 0.0), 3)
         semantic_end = round(float(pkg.get("end", semantic_start) or semantic_start), 3)
         raw_voice_keep = bool(pkg.get("llm_raw_voice_keep")) or (
             bool(pkg.get("raw_voice_retain_suggestion"))
-            and plot_function in {"情感爆发", "反转", "结局收束"}
+            and plot_function in {"\u60c5\u611f\u7206\u53d1", "\u53cd\u8f6c", "\u7ed3\u5c40\u6536\u675f"}
             and importance == "high"
         )
-        snap_window = 8.0 if raw_voice_keep else (4.0 if importance == "high" else 2.5)
+        snap_window = (
+            _HIGHLIGHT_SNAP_WINDOW_RAW_VOICE_SECONDS
+            if raw_voice_keep
+            else (
+                _HIGHLIGHT_SNAP_WINDOW_HIGH_SECONDS
+                if importance == "high"
+                else _HIGHLIGHT_SNAP_WINDOW_DEFAULT_SECONDS
+            )
+        )
         grouped = _align_range_to_scene_group(
             semantic_start,
             semantic_end,
@@ -420,6 +515,7 @@ def _extract_story_highlights(
             lead_window=snap_window,
             tail_window=snap_window,
             hard_start_floor=float(pkg.get("prologue_end", 0.0) or 0.0) if pkg.get("prologue_trimmed") else None,
+            hard_end_ceiling=float(pkg.get("story_end", 0.0) or 0.0) if pkg.get("story_end") is not None else None,
         )
         snapped_start = float(grouped["start"])
         snapped_end = float(grouped["end"])
@@ -431,7 +527,7 @@ def _extract_story_highlights(
             reasons.append(f"plot:{plot_function}")
         if block_type in {"action", "emotion", "visual"}:
             reasons.append(f"block:{block_type}")
-        if attraction in {"高", "high"}:
+        if attraction in {"\u9ad8", "high"}:
             reasons.append("high_attraction")
         if raw_voice_keep:
             reasons.append("raw_voice_candidate")
@@ -469,6 +565,10 @@ def _extract_story_highlights(
                 "scene_group_count": grouped["scene_group_count"],
                 "scene_group_ranges": grouped["scene_group_ranges"],
                 "scene_group_mode": grouped["scene_group_mode"],
+                "story_end": pkg.get("story_end"),
+                "story_end_trimmed": bool(pkg.get("story_end_trimmed")),
+                "story_end_original_after_story_end": bool(pkg.get("story_end_original_after_story_end")),
+                "after_story_end": bool(pkg.get("after_story_end")),
             }
         )
 
@@ -535,15 +635,338 @@ def _filter_script_items_by_highlights(
     return kept
 
 
-def _build_highlight_only_script(story_highlights: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _unique_strings(values: List[Any], limit: int = 0) -> List[str]:
+    out: List[str] = []
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text or text in out:
+            continue
+        out.append(text)
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def _merge_text_snippets(values: List[Any], limit: int = 4, max_chars: int = 240) -> str:
+    pieces = _unique_strings(values, limit=limit)
+    if not pieces:
+        return ""
+    return "；".join(pieces)[:max_chars].strip("；")
+
+
+def _representative_frame_desc(frame_path: str, rank: int, timestamp_seconds: float | None = None) -> str:
+    if timestamp_seconds is not None:
+        return f"第{rank}张代表帧，时间点 {utils.format_time(float(timestamp_seconds))}"
+    return f"第{rank}张代表帧，来自 {os.path.basename(frame_path)}"
+
+
+def _highlight_frame_budget(highlight: Dict[str, Any]) -> int:
+    start = float(highlight.get("start", 0.0) or 0.0)
+    end = float(highlight.get("end", start) or start)
+    duration = max(end - start, 0.1)
+    if duration >= 35.0:
+        return 5
+    if duration >= 18.0 or str(highlight.get("importance_level") or "") == "high":
+        return 4
+    return 3
+
+
+def _prepare_highlight_frame_targets(story_highlights: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    targets: List[Dict[str, Any]] = []
+    for item in story_highlights or []:
+        cur = dict(item)
+        highlight_id = str(cur.get("highlight_id") or "").strip()
+        if not highlight_id:
+            continue
+        cur["scene_id"] = highlight_id
+        cur["segment_id"] = highlight_id
+        cur["frame_budget"] = int(cur.get("frame_budget") or _highlight_frame_budget(cur))
+        targets.append(cur)
+    return targets
+
+
+def _build_highlight_visual_summary(
+    highlight_id: str,
+    highlight_frame_records: List[Dict[str, Any]],
+    source_visual_summary: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]:
+    records = sorted(
+        [
+            dict(rec)
+            for rec in (highlight_frame_records or [])
+            if str(rec.get("scene_id") or rec.get("segment_id") or "").strip() == highlight_id
+        ],
+        key=lambda x: (
+            int(x.get("rank", 0) or 0),
+            float(x.get("timestamp_seconds", 0.0) or 0.0),
+        ),
+    )
+
+    if records:
+        visual_summary: List[Dict[str, Any]] = []
+        representative_frames: List[Dict[str, Any]] = []
+        for idx, rec in enumerate(records, start=1):
+            frame_path = str(rec.get("frame_path") or "").strip()
+            if not frame_path:
+                continue
+            timestamp_seconds = float(rec.get("timestamp_seconds", 0.0) or 0.0)
+            desc = _representative_frame_desc(frame_path, idx, timestamp_seconds=timestamp_seconds)
+            visual_summary.append(
+                {
+                    "frame": frame_path,
+                    "desc": desc,
+                    "timestamp_seconds": round(timestamp_seconds, 3),
+                    "rank": int(rec.get("rank", idx) or idx),
+                }
+            )
+            representative_frames.append(
+                {
+                    "frame_path": frame_path,
+                    "timestamp_seconds": round(timestamp_seconds, 3),
+                    "timestamp": utils.format_time(timestamp_seconds),
+                    "rank": int(rec.get("rank", idx) or idx),
+                    "desc": desc,
+                }
+            )
+        return visual_summary, [x["frame_path"] for x in representative_frames], representative_frames
+
+    fallback_visual_summary: List[Dict[str, Any]] = []
+    fallback_frames: List[Dict[str, Any]] = []
+    for idx, item in enumerate(source_visual_summary[:4], start=1):
+        frame_path = str(item.get("frame") or item.get("frame_path") or "").strip()
+        desc = str(item.get("desc") or item.get("observation") or "").strip()
+        if not frame_path and not desc:
+            continue
+        fallback_visual_summary.append(
+            {
+                "frame": frame_path,
+                "desc": desc or _representative_frame_desc(frame_path, idx),
+                "timestamp_seconds": item.get("timestamp_seconds"),
+                "rank": idx,
+            }
+        )
+        fallback_frames.append(
+            {
+                "frame_path": frame_path,
+                "timestamp_seconds": item.get("timestamp_seconds"),
+                "timestamp": utils.format_time(float(item.get("timestamp_seconds", 0.0) or 0.0))
+                if item.get("timestamp_seconds") is not None
+                else "",
+                "rank": idx,
+                "desc": desc or _representative_frame_desc(frame_path, idx),
+            }
+        )
+    return fallback_visual_summary, [x.get("frame_path", "") for x in fallback_frames if x.get("frame_path")], fallback_frames
+
+
+def _collect_highlight_source_packages(
+    highlight: Dict[str, Any],
+    scene_evidence: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    highlight_segment_ids = {str(x).strip() for x in (highlight.get("segment_ids") or []) if str(x or "").strip()}
+    highlight_scene_ids = {str(x).strip() for x in (highlight.get("scene_ids") or []) if str(x or "").strip()}
+    highlight_start = float(highlight.get("start", 0.0) or 0.0)
+    highlight_end = float(highlight.get("end", highlight_start) or highlight_start)
+
+    matched: List[Dict[str, Any]] = []
+    for pkg in scene_evidence or []:
+        seg_id = str(pkg.get("segment_id") or "").strip()
+        scene_id = str(pkg.get("scene_id") or "").strip()
+        start = float(pkg.get("start", 0.0) or 0.0)
+        end = float(pkg.get("end", start) or start)
+        if (
+            (seg_id and seg_id in highlight_segment_ids)
+            or (scene_id and scene_id in highlight_scene_ids)
+            or _ranges_overlap(start, end, highlight_start, highlight_end, 0.8)
+        ):
+            matched.append(dict(pkg))
+    matched.sort(key=lambda x: (float(x.get("start", 0.0) or 0.0), float(x.get("end", 0.0) or 0.0)))
+    return matched
+
+
+def _build_highlight_story_validation(source_packages: List[Dict[str, Any]], raw_voice_keep: bool) -> Dict[str, Any]:
+    validator_status = "pass"
+    validator_hints: List[str] = []
+    for pkg in source_packages or []:
+        validation = dict(pkg.get("story_validation") or {})
+        status = str(validation.get("validator_status") or "pass")
+        if status == "risky":
+            validator_status = "risky"
+        validator_hints.extend(validation.get("validator_hints") or [])
+    return {
+        "validator_status": validator_status,
+        "validator_hints": _unique_strings(validator_hints, limit=6),
+        "raw_voice_keep": bool(raw_voice_keep),
+    }
+
+
+def _build_highlight_local_understanding(source_packages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    core_events: List[str] = []
+    emotions: List[str] = []
+    characters: List[str] = []
+    risk_flags: List[str] = []
+    for pkg in source_packages or []:
+        local = dict(pkg.get("local_understanding") or {})
+        if local.get("core_event"):
+            core_events.append(local["core_event"])
+        if local.get("emotion"):
+            emotions.append(local["emotion"])
+        characters.extend(local.get("characters") or [])
+        risk_flags.extend(local.get("narrative_risk_flags") or [])
+    emotion_pick = _unique_strings(emotions, limit=1)
+    return {
+        "core_event": _merge_text_snippets(core_events, limit=3, max_chars=120),
+        "emotion": emotion_pick[0] if emotion_pick else "",
+        "characters": _unique_strings(characters, limit=8),
+        "narrative_risk_flags": _unique_strings(risk_flags, limit=6),
+    }
+
+
+def _build_highlight_narration_segments(
+    *,
+    story_highlights: List[Dict[str, Any]],
+    scene_evidence: List[Dict[str, Any]],
+    highlight_frame_records: List[Dict[str, Any]],
+    global_summary: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    packages: List[Dict[str, Any]] = []
+    for idx, highlight in enumerate(story_highlights or [], start=1):
+        highlight_id = str(highlight.get("highlight_id") or f"highlight_{idx:03d}").strip()
+        start = round(float(highlight.get("start", 0.0) or 0.0), 3)
+        end = round(float(highlight.get("end", start) or start), 3)
+        if end <= start:
+            end = round(start + 0.5, 3)
+
+        source_packages = _collect_highlight_source_packages(highlight, scene_evidence)
+        subtitle_ids: List[Any] = []
+        source_visual_summary: List[Dict[str, Any]] = []
+        speaker_names: List[str] = []
+        exchange_pairs: List[Any] = []
+        frame_paths_from_source: List[str] = []
+        for pkg in source_packages:
+            subtitle_ids.extend(pkg.get("subtitle_ids") or [])
+            source_visual_summary.extend(pkg.get("visual_summary") or [])
+            speaker_names.extend(pkg.get("speaker_names") or [])
+            exchange_pairs.extend(pkg.get("exchange_pairs") or [])
+            frame_paths_from_source.extend(pkg.get("frame_paths") or [])
+
+        visual_summary, frame_paths, representative_frames = _build_highlight_visual_summary(
+            highlight_id,
+            highlight_frame_records,
+            source_visual_summary,
+        )
+        if not frame_paths:
+            frame_paths = _unique_strings(frame_paths_from_source, limit=6)
+
+        main_text = _merge_text_snippets(
+            [pkg.get("main_text_evidence") or pkg.get("subtitle_text") for pkg in source_packages] + [highlight.get("source_text")],
+            limit=6,
+            max_chars=320,
+        )
+        surface_dialogue = _merge_text_snippets(
+            [pkg.get("surface_dialogue_meaning") for pkg in source_packages],
+            limit=4,
+            max_chars=220,
+        )
+        real_state = _merge_text_snippets(
+            [pkg.get("real_narrative_state") for pkg in source_packages],
+            limit=4,
+            max_chars=220,
+        )
+        plot_functions = _unique_strings(
+            list(highlight.get("plot_functions") or []) + [pkg.get("plot_function") for pkg in source_packages],
+            limit=4,
+        )
+        picture = "；".join(str(item.get("desc") or "").strip() for item in visual_summary[:2]).strip("；")
+        if not picture:
+            picture = " / ".join(_unique_strings(highlight.get("highlight_reasons") or [], limit=2)) or main_text[:80] or "高光片段"
+
+        raw_voice_keep = bool(highlight.get("raw_voice_retain"))
+        local_understanding = _build_highlight_local_understanding(source_packages)
+        story_validation = _build_highlight_story_validation(source_packages, raw_voice_keep)
+        importance_level = str(highlight.get("importance_level") or "high")
+        plot_function = plot_functions[0] if plot_functions else ""
+        attraction_candidates = _unique_strings([pkg.get("attraction_level") for pkg in source_packages], limit=3)
+        attraction_level = attraction_candidates[0] if attraction_candidates else ("high" if importance_level == "high" else "medium")
+        confidence_candidates = _unique_strings([pkg.get("confidence") for pkg in source_packages], limit=3)
+        confidence = confidence_candidates[0] if confidence_candidates else "highlight"
+        plot_role_candidates = _unique_strings([pkg.get("plot_role") for pkg in source_packages], limit=3)
+        plot_role = plot_role_candidates[0] if plot_role_candidates else ""
+        narrative_risk_flags = _unique_strings(
+            [flag for pkg in source_packages for flag in (pkg.get("narrative_risk_flags") or [])],
+            limit=8,
+        )
+
+        package = {
+            "segment_id": "+".join(highlight.get("segment_ids") or []) or highlight_id,
+            "scene_id": highlight_id,
+            "highlight_id": highlight_id,
+            "highlight_rank": int(highlight.get("highlight_rank", idx) or idx),
+            "highlight_reasons": list(highlight.get("highlight_reasons") or []),
+            "source_segment_ids": _unique_strings(highlight.get("segment_ids") or [], limit=12),
+            "source_scene_ids": _unique_strings(highlight.get("scene_ids") or [], limit=12),
+            "source_evidence_ids": _unique_strings(highlight.get("evidence_ids") or [], limit=12),
+            "time_window": [start, end],
+            "timestamp": f"{utils.format_time(start)}-{utils.format_time(end)}",
+            "semantic_timestamp": highlight.get("semantic_timestamp") or f"{utils.format_time(start)}-{utils.format_time(end)}",
+            "start": start,
+            "end": end,
+            "duration": round(max(end - start, 0.1), 3),
+            "plot_function": plot_function,
+            "plot_functions": plot_functions,
+            "plot_role": plot_role,
+            "importance_level": importance_level,
+            "attraction_level": attraction_level,
+            "confidence": confidence,
+            "boundary_confidence": highlight.get("boundary_confidence"),
+            "scene_align_mode": highlight.get("scene_align_mode"),
+            "scene_group_count": highlight.get("scene_group_count", 0),
+            "scene_group_ranges": list(highlight.get("scene_group_ranges") or []),
+            "scene_group_mode": highlight.get("scene_group_mode", ""),
+            "main_text_evidence": main_text,
+            "subtitle_text": main_text,
+            "subtitle_ids": list(dict.fromkeys(subtitle_ids)),
+            "surface_dialogue_meaning": surface_dialogue,
+            "real_narrative_state": real_state,
+            "visual_summary": visual_summary,
+            "frame_paths": frame_paths,
+            "representative_frames": representative_frames,
+            "picture": picture,
+            "speaker_names": _unique_strings(speaker_names, limit=6),
+            "speaker_turns": sum(int(pkg.get("speaker_turns", 0) or 0) for pkg in source_packages),
+            "exchange_pairs": exchange_pairs[:6],
+            "emotion_hint": local_understanding.get("emotion") or "平静",
+            "local_understanding": local_understanding,
+            "story_validation": story_validation,
+            "raw_voice_retain_suggestion": bool(raw_voice_keep),
+            "raw_voice_retain": bool(raw_voice_keep),
+            "llm_highlight_selected": True,
+            "llm_raw_voice_keep": bool(raw_voice_keep),
+            "narrative_risk_flags": narrative_risk_flags,
+            "need_visual_verify": any(bool(pkg.get("need_visual_verify")) for pkg in source_packages),
+            "before_prologue_end": False,
+            "after_story_end": bool(highlight.get("after_story_end")),
+            "prologue_end": None,
+            "story_end": highlight.get("story_end"),
+            "story_end_trimmed": bool(highlight.get("story_end_trimmed")),
+            "story_end_original_after_story_end": bool(highlight.get("story_end_original_after_story_end")),
+            "_global_summary": global_summary,
+        }
+        packages.append(package)
+
+    packages.sort(key=lambda x: (float(x.get("start", 0.0) or 0.0), int(x.get("highlight_rank", 0) or 0)))
+    return packages
+
+
+def _build_highlight_only_script(highlight_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
-    for idx, item in enumerate(story_highlights, start=1):
+    for idx, item in enumerate(highlight_segments, start=1):
         start = float(item.get("start", 0.0) or 0.0)
         end = float(item.get("end", start) or start)
         if end <= start:
             end = start + 0.5
         reasons = " / ".join(item.get("highlight_reasons") or [])
-        picture = reasons[:80] or "高光片段"
+        picture = (item.get("picture") or reasons or "高光片段")[:80]
         items.append(
             {
                 "_id": idx,
@@ -556,19 +979,30 @@ def _build_highlight_only_script(story_highlights: List[Dict[str, Any]]) -> List
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "duration": round(max(end - start, 0.1), 3),
-                "segment_id": "+".join(item.get("segment_ids") or []) or item.get("highlight_id"),
+                "segment_id": str(item.get("segment_id") or "+".join(item.get("segment_ids") or []) or item.get("highlight_id")),
                 "scene_id": item.get("highlight_id"),
-                "plot_function": ",".join(item.get("plot_functions") or []),
+                "plot_function": item.get("plot_function") or ",".join(item.get("plot_functions") or []),
                 "importance_level": item.get("importance_level", "high"),
                 "llm_highlight_selected": True,
-                "llm_raw_voice_keep": bool(item.get("raw_voice_retain")),
+                "llm_raw_voice_keep": bool(item.get("raw_voice_retain") or item.get("llm_raw_voice_keep")),
                 "scene_align_mode": item.get("scene_align_mode"),
                 "scene_group_count": item.get("scene_group_count", 0),
                 "scene_group_ranges": item.get("scene_group_ranges", []),
                 "scene_group_mode": item.get("scene_group_mode", ""),
+                "story_end": item.get("story_end"),
+                "story_end_trimmed": bool(item.get("story_end_trimmed")),
+                "story_end_original_after_story_end": bool(item.get("story_end_original_after_story_end")),
+                "after_story_end": bool(item.get("after_story_end")),
                 "highlight_id": item.get("highlight_id"),
                 "highlight_rank": item.get("highlight_rank"),
                 "highlight_reasons": item.get("highlight_reasons") or [],
+                "frame_paths": list(item.get("frame_paths") or []),
+                "visual_summary": list(item.get("visual_summary") or []),
+                "representative_frames": list(item.get("representative_frames") or []),
+                "source_segment_ids": list(item.get("source_segment_ids") or item.get("segment_ids") or []),
+                "source_scene_ids": list(item.get("source_scene_ids") or item.get("scene_ids") or []),
+                "source_evidence_ids": list(item.get("source_evidence_ids") or item.get("evidence_ids") or []),
+                "main_text_evidence": item.get("main_text_evidence") or item.get("source_text") or "",
                 "char_budget": 0,
                 "fit_check": {"status": "highlight_only", "target_chars": 0, "actual_chars": 0},
                 "narration_validation": {"status": "skip", "issues": [], "safe_rewrite_hint": "", "raw_voice_keep": True},
@@ -597,14 +1031,16 @@ def _validate_pipeline_quality(
 
     highlight_selectivity = _resolve_highlight_selectivity(highlight_selectivity)
     highlight_windows = list(full_subtitle_understanding.get("highlight_windows") or [])
+    highlight_windows_backfilled = bool(full_subtitle_understanding.get("highlight_windows_backfilled"))
     subtitle_input_mode = str(full_subtitle_understanding.get("subtitle_input_mode") or "").strip()
     subtitle_chunk_summaries = list(full_subtitle_understanding.get("subtitle_chunk_summaries") or [])
-    if subtitle_input_mode in ("", "timeline_digest"):
-        issues.append("鏁村瓧骞曠悊瑙ｆ湭鐪熸浣跨敤鏁村瓧骞曞叏鏂囨垨鍒嗗潡缁撴灉")
-    if subtitle_input_mode == "chunked_full_subtitle" and not subtitle_chunk_summaries:
-        issues.append("鏁村瓧骞曞垎鍧楃悊瑙ｅけ璐ワ紝鏈骇鍑烘湁鏁堢殑鍒嗗潡鎽樿")
     selected_segment_ids = list(llm_highlight_plan.get("selected_segment_ids") or [])
     raw_voice_segment_ids = set(str(x) for x in (llm_highlight_plan.get("raw_voice_segment_ids") or []) if x)
+    has_highlight_signals = bool(highlight_windows or selected_segment_ids or story_highlights)
+    if subtitle_input_mode in ("", "timeline_digest") and not highlight_windows_backfilled and not has_highlight_signals:
+        issues.append("整字幕理解未真正使用整字幕全文或分块结果")
+    if subtitle_input_mode == "chunked_full_subtitle" and not subtitle_chunk_summaries and not has_highlight_signals:
+        issues.append("整字幕分块理解失败，未产出有效的分块摘要")
     highlight_signal_count = max(
         len(highlight_windows),
         len(selected_segment_ids),
@@ -619,16 +1055,15 @@ def _validate_pipeline_quality(
         else:
             min_required_story_highlights = 1 if highlight_signal_count <= 4 else 2
 
-    if not highlight_windows:
+    if not highlight_windows and not selected_segment_ids and not story_highlights:
         issues.append("整字幕理解未产出高光窗口")
-    if not selected_segment_ids and not highlight_windows:
+    if not selected_segment_ids and not highlight_windows and not story_highlights:
         issues.append("精细段高光选择未产出入选结果")
     if len(story_highlights) < 2:
         issues.append("最终高光片段过少")
 
     if len(story_highlights) >= min_required_story_highlights:
         issues = [issue for issue in issues if issue != "\u6700\u7ec8\u9ad8\u5149\u7247\u6bb5\u8fc7\u5c11"]
-        issues = [issue for issue in issues if issue != "鏈€缁堥珮鍏夌墖娈佃繃灏?"]
 
     for item in story_highlights:
         if float(item.get("end", 0.0) or 0.0) <= float(item.get("start", 0.0) or 0.0):
@@ -666,10 +1101,13 @@ def _build_story_audit_payload(
     plot_chunks: List[Dict[str, Any]],
     selected_scene_evidence: List[Dict[str, Any]],
     story_highlights: List[Dict[str, Any]],
+    highlight_narration_segments: List[Dict[str, Any]],
     llm_highlight_plan: Dict[str, Any],
     script_items: List[Dict[str, Any]],
     scene_cut_points: List[float],
     video_boundary_candidates: List[Dict[str, Any]],
+    frame_records: List[Dict[str, Any]],
+    highlight_frame_records: List[Dict[str, Any]],
     quality_issues: List[str],
     warnings: List[str],
 ) -> Dict[str, Any]:
@@ -691,10 +1129,13 @@ def _build_story_audit_payload(
         "plot_chunks": plot_chunks,
         "selected_scene_evidence": selected_scene_evidence,
         "story_highlights": story_highlights,
+        "highlight_narration_segments": highlight_narration_segments,
         "llm_highlight_plan": llm_highlight_plan,
         "script_items": script_items,
         "scene_cut_points": scene_cut_points,
         "video_boundary_candidates": video_boundary_candidates,
+        "frame_records": frame_records,
+        "highlight_frame_records": highlight_frame_records,
         "quality_issues": quality_issues,
         "warnings": warnings,
     }
@@ -708,6 +1149,182 @@ def _parse_prompt_time(raw: Any) -> float | None:
         return round(float(utils.time_to_seconds(text)), 3)
     except Exception:
         return None
+
+
+def _coerce_highlight_time(raw: Any) -> float | None:
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, (int, float)):
+        return round(float(raw), 3)
+    return _parse_prompt_time(raw)
+
+
+def _normalize_prompt_highlight_window(
+    item: Dict[str, Any],
+    *,
+    default_category: str = "",
+    default_importance: str = "medium",
+    default_raw_voice_priority: str = "low",
+    default_reason: str = "llm_highlight_window",
+) -> Dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+
+    start = _coerce_highlight_time(item.get("start"))
+    end = _coerce_highlight_time(item.get("end"))
+    if start is None or end is None or end <= start:
+        return None
+
+    importance = str(item.get("importance") or default_importance or "medium").strip().lower()
+    if importance not in {"high", "medium", "low"}:
+        importance = default_importance
+    raw_voice_priority = str(
+        item.get("raw_voice_priority") or default_raw_voice_priority or "low"
+    ).strip().lower()
+    if raw_voice_priority not in {"high", "medium", "low"}:
+        raw_voice_priority = default_raw_voice_priority
+
+    category = str(item.get("category") or item.get("label") or default_category or "信息揭露").strip()
+    reason = str(item.get("reason") or item.get("label") or category or default_reason).strip()
+    return {
+        "start": utils.format_time(start),
+        "end": utils.format_time(end),
+        "category": category,
+        "importance": importance,
+        "raw_voice_priority": raw_voice_priority,
+        "reason": reason,
+    }
+
+
+def _dedupe_prompt_highlight_windows(windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    ordered = sorted(
+        (item for item in windows if isinstance(item, dict)),
+        key=lambda x: (_coerce_highlight_time(x.get("start")) or 0.0, _coerce_highlight_time(x.get("end")) or 0.0),
+    )
+    for item in ordered:
+        key = (
+            item.get("start"),
+            item.get("end"),
+            str(item.get("category") or ""),
+            str(item.get("importance") or ""),
+            str(item.get("raw_voice_priority") or ""),
+            str(item.get("reason") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _resolve_highlight_category(
+    reasons: List[str] | None,
+    plot_functions: List[str] | None = None,
+) -> str:
+    candidates: List[str] = [str(x).strip() for x in (plot_functions or []) if str(x or "").strip()]
+    for reason in reasons or []:
+        text = str(reason or "").strip()
+        if not text:
+            continue
+        if text.startswith("plot:"):
+            candidates.insert(0, text.split(":", 1)[1].strip())
+        else:
+            candidates.append(text)
+
+    for cue in ("反转", "情感爆发", "冲突升级", "信息揭露", "高潮", "结局收束", "结尾"):
+        for item in candidates:
+            if cue and cue in item:
+                return cue
+    return candidates[0] if candidates else ""
+
+
+def _build_prompt_highlight_windows_from_story_highlights(
+    story_highlights: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    windows: List[Dict[str, Any]] = []
+    for item in story_highlights or []:
+        reason_parts = [str(x).strip() for x in (item.get("highlight_reasons") or []) if str(x or "").strip()]
+        importance = str(item.get("importance_level") or "medium").strip().lower()
+        if importance not in {"high", "medium", "low"}:
+            importance = "medium"
+        raw_voice_priority = "high" if bool(item.get("raw_voice_retain")) else ("medium" if importance == "high" else "low")
+        category = _resolve_highlight_category(reason_parts, list(item.get("plot_functions") or []))
+        normalized = _normalize_prompt_highlight_window(
+            {
+                "start": item.get("start"),
+                "end": item.get("end"),
+                "category": category,
+                "importance": importance,
+                "raw_voice_priority": raw_voice_priority,
+                "reason": " / ".join(reason_parts[:3]) or category or "story_highlights_fallback",
+            },
+            default_category=category or "信息揭露",
+            default_importance=importance,
+            default_raw_voice_priority=raw_voice_priority,
+            default_reason="story_highlights_fallback",
+        )
+        if normalized:
+            windows.append(normalized)
+    return _dedupe_prompt_highlight_windows(windows)
+
+
+def _ensure_full_subtitle_highlight_windows(
+    *,
+    full_subtitle_understanding: Dict[str, Any],
+    llm_highlight_plan: Dict[str, Any],
+    story_highlights: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    updated = dict(full_subtitle_understanding or {})
+    existing_windows = _dedupe_prompt_highlight_windows(
+        [
+            normalized
+            for normalized in (
+                _normalize_prompt_highlight_window(item)
+                for item in list(updated.get("highlight_windows") or [])
+            )
+            if normalized
+        ]
+    )
+    if existing_windows:
+        updated["highlight_windows"] = existing_windows
+        updated.setdefault("highlight_windows_backfilled", False)
+        updated["highlight_windows_source"] = str(updated.get("highlight_windows_source") or "llm_or_existing")
+        return updated
+
+    llm_plan_windows = _dedupe_prompt_highlight_windows(
+        [
+            normalized
+            for normalized in (
+                _normalize_prompt_highlight_window(
+                    item,
+                    default_importance="high",
+                    default_raw_voice_priority="medium",
+                    default_reason="llm_must_keep_range",
+                )
+                for item in list(llm_highlight_plan.get("must_keep_ranges") or [])
+            )
+            if normalized
+        ]
+    )
+    if llm_plan_windows:
+        updated["highlight_windows"] = llm_plan_windows
+        updated["highlight_windows_backfilled"] = True
+        updated["highlight_windows_source"] = "llm_plan_must_keep_ranges"
+        return updated
+
+    story_windows = _build_prompt_highlight_windows_from_story_highlights(story_highlights)
+    if story_windows:
+        updated["highlight_windows"] = story_windows
+        updated["highlight_windows_backfilled"] = True
+        updated["highlight_windows_source"] = "story_highlights_fallback"
+        return updated
+
+    updated.setdefault("highlight_windows", [])
+    updated.setdefault("highlight_windows_backfilled", False)
+    updated["highlight_windows_source"] = str(updated.get("highlight_windows_source") or "none")
+    return updated
 
 
 def _is_meaningful_speech_segment(item: Dict[str, Any]) -> bool:
@@ -727,6 +1344,182 @@ def _infer_first_speech_time(subtitle_segments: List[Dict[str, Any]]) -> float |
         if _is_meaningful_speech_segment(item):
             return round(float(item.get("start", 0.0) or 0.0), 3)
     return None
+
+
+def _normalize_tail_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).strip()
+
+
+def _score_tail_preview_marker(text: str, position_ratio: float) -> float:
+    if not text:
+        return 0.0
+
+    score = 0.0
+    for cue, weight in _TAIL_PREVIEW_CUES.items():
+        if cue in text:
+            score += weight
+
+    if "预告" in text and any(cue in text for cue in ("下集", "下期", "下回", "次集", "下一集")):
+        score += 2.5
+    if _TAIL_BRACKET_RE.match(text) and "预告" in text:
+        score += 1.2
+    if position_ratio >= 0.92:
+        score += 1.2
+    elif position_ratio >= 0.84:
+        score += 0.7
+    return round(score, 3)
+
+
+def _score_tail_credits_marker(text: str, position_ratio: float) -> float:
+    if not text:
+        return 0.0
+
+    score = 0.0
+    for cue, weight in _TAIL_CREDITS_CUES.items():
+        if cue in text:
+            score += weight
+
+    if _TAIL_BRACKET_RE.match(text) and ("片尾" in text or "片尾曲" in text):
+        score += 1.5
+    if _PROLOGUE_CUE_ONLY_RE.match(text) and position_ratio >= 0.9:
+        score += 0.8
+    if position_ratio >= 0.9:
+        score += 0.9
+    elif position_ratio >= 0.82:
+        score += 0.4
+    return round(score, 3)
+
+
+def _merge_tail_marker_runs(markers: List[Dict[str, Any]], gap_threshold: float = 8.0) -> List[Dict[str, Any]]:
+    if not markers:
+        return []
+
+    ordered = sorted(markers, key=lambda x: (float(x.get("start", 0.0) or 0.0), -float(x.get("score", 0.0) or 0.0)))
+    merged: List[Dict[str, Any]] = [dict(ordered[0])]
+    for item in ordered[1:]:
+        current = dict(item)
+        prev = merged[-1]
+        same_type = str(prev.get("type") or "") == str(current.get("type") or "")
+        close_enough = float(current.get("start", 0.0) or 0.0) <= float(prev.get("end", 0.0) or 0.0) + gap_threshold
+        if not (same_type and close_enough):
+            merged.append(current)
+            continue
+
+        prev["end"] = round(max(float(prev.get("end", 0.0) or 0.0), float(current.get("end", 0.0) or 0.0)), 3)
+        prev["score"] = round(max(float(prev.get("score", 0.0) or 0.0), float(current.get("score", 0.0) or 0.0)), 3)
+        prev["source_segment_ids"] = list(
+            dict.fromkeys(list(prev.get("source_segment_ids") or []) + list(current.get("source_segment_ids") or []))
+        )
+        prev["reason"] = " / ".join(
+            dict.fromkeys(
+                [str(x).strip() for x in [prev.get("reason"), current.get("reason")] if str(x or "").strip()]
+            )
+        )
+    return merged
+
+
+def _detect_tail_markers(subtitle_segments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    ordered = sorted(subtitle_segments or [], key=lambda x: float(x.get("start", 0.0) or 0.0))
+    if not ordered:
+        return {
+            "story_end_seconds": None,
+            "story_end_source": "none",
+            "credits_start_seconds": None,
+            "preview_start_seconds": None,
+            "tail_markers": [],
+        }
+
+    total_duration = max(float(ordered[-1].get("end", ordered[-1].get("start", 0.0)) or 0.0), 0.0)
+    if total_duration <= 0.0:
+        return {
+            "story_end_seconds": None,
+            "story_end_source": "none",
+            "credits_start_seconds": None,
+            "preview_start_seconds": None,
+            "tail_markers": [],
+        }
+
+    candidates: List[Dict[str, Any]] = []
+    for seg in ordered:
+        start = round(float(seg.get("start", 0.0) or 0.0), 3)
+        end = round(float(seg.get("end", start) or start), 3)
+        if end <= start:
+            end = round(start + 0.5, 3)
+        position_ratio = start / max(total_duration, 1.0)
+        if position_ratio < 0.72:
+            continue
+
+        text = _normalize_tail_text(seg.get("text") or seg.get("subtitle_text") or "")
+        if not text:
+            continue
+
+        preview_score = _score_tail_preview_marker(text, position_ratio)
+        credits_score = _score_tail_credits_marker(text, position_ratio)
+        if preview_score < 4.0 and credits_score < 4.2:
+            continue
+
+        marker_type = "preview" if preview_score >= credits_score else "credits"
+        score = max(preview_score, credits_score)
+        reason = "tail_preview_cue" if marker_type == "preview" else "tail_credits_cue"
+        candidates.append(
+            {
+                "type": marker_type,
+                "start": start,
+                "end": end,
+                "score": round(score, 3),
+                "reason": reason,
+                "source_segment_ids": [str(seg.get("seg_id") or seg.get("id") or "")],
+            }
+        )
+
+    markers = _merge_tail_marker_runs(candidates)
+    preview_marker = next((item for item in markers if str(item.get("type") or "") == "preview"), None)
+    credits_candidates = [item for item in markers if str(item.get("type") or "") == "credits"]
+    if preview_marker is not None:
+        credits_candidates = [
+            item for item in credits_candidates if float(item.get("start", 0.0) or 0.0) <= float(preview_marker.get("start", 0.0) or 0.0) + 1.0
+        ]
+    credits_marker = credits_candidates[0] if credits_candidates else None
+
+    story_end_candidates = [
+        float(item.get("start", 0.0) or 0.0)
+        for item in (credits_marker, preview_marker)
+        if item is not None
+    ]
+    story_end_seconds = min(story_end_candidates) if story_end_candidates else None
+    story_end_source_parts: List[str] = []
+    if credits_marker is not None:
+        story_end_source_parts.append("credits_auto")
+    if preview_marker is not None:
+        story_end_source_parts.append("preview_auto")
+
+    return {
+        "story_end_seconds": round(float(story_end_seconds), 3) if story_end_seconds is not None else None,
+        "story_end_source": "+".join(story_end_source_parts) if story_end_source_parts else "none",
+        "credits_start_seconds": round(float(credits_marker.get("start", 0.0) or 0.0), 3) if credits_marker is not None else None,
+        "preview_start_seconds": round(float(preview_marker.get("start", 0.0) or 0.0), 3) if preview_marker is not None else None,
+        "tail_markers": markers,
+    }
+
+
+def _resolve_story_end_from_tail_markers(
+    *,
+    full_subtitle_understanding: Dict[str, Any],
+    subtitle_segments: List[Dict[str, Any]],
+) -> tuple[Dict[str, Any], List[str]]:
+    detected = _detect_tail_markers(subtitle_segments)
+    updated = dict(full_subtitle_understanding or {})
+    story_end_seconds = detected.get("story_end_seconds")
+    credits_start_seconds = detected.get("credits_start_seconds")
+    preview_start_seconds = detected.get("preview_start_seconds")
+
+    updated["tail_markers"] = list(detected.get("tail_markers") or [])
+    updated["resolved_story_end_source"] = str(detected.get("story_end_source") or "none")
+    updated["resolved_story_end_seconds"] = story_end_seconds
+    updated["story_end_time"] = utils.format_time(float(story_end_seconds)) if story_end_seconds is not None else ""
+    updated["credits_start_time"] = utils.format_time(float(credits_start_seconds)) if credits_start_seconds is not None else ""
+    updated["preview_start_time"] = utils.format_time(float(preview_start_seconds)) if preview_start_seconds is not None else ""
+    return updated, []
 
 
 def _resolve_prologue_end_from_strategy(
@@ -867,6 +1660,82 @@ def _annotate_prologue_state(
     return cur
 
 
+def _clip_range_before_story_end(
+    start: float,
+    end: float,
+    story_end: float | None,
+    *,
+    min_duration: float = 0.5,
+) -> tuple[float, float, bool]:
+    safe_start = round(float(start or 0.0), 3)
+    safe_end = round(float(end or safe_start), 3)
+    if safe_end <= safe_start:
+        safe_end = round(safe_start + min_duration, 3)
+    if story_end is None or safe_end <= story_end or safe_start >= story_end - min_duration:
+        return safe_start, safe_end, False
+
+    trimmed_end = round(min(safe_end, story_end), 3)
+    if trimmed_end <= safe_start + min_duration:
+        return safe_start, safe_end, False
+    return safe_start, trimmed_end, trimmed_end < safe_end
+
+
+def _build_story_end_metrics(start: float, end: float, story_end: float | None) -> Dict[str, Any]:
+    safe_start = round(float(start or 0.0), 3)
+    safe_end = round(float(end or safe_start), 3)
+    if safe_end <= safe_start:
+        safe_end = round(safe_start + 0.5, 3)
+    duration = max(safe_end - safe_start, 0.1)
+
+    if story_end is None:
+        return {
+            "after_story_end": False,
+            "crosses_story_end_boundary": False,
+            "story_end_overlap_duration": 0.0,
+            "story_end_overlap_ratio": 0.0,
+        }
+
+    overlap = max(0.0, safe_end - max(safe_start, story_end))
+    return {
+        "after_story_end": bool(safe_start >= story_end - 0.05),
+        "crosses_story_end_boundary": bool(safe_start < story_end - 0.05 and safe_end > story_end + 0.05),
+        "story_end_overlap_duration": round(overlap, 3),
+        "story_end_overlap_ratio": round(min(overlap / duration, 1.0), 3),
+    }
+
+
+def _annotate_story_end_state(
+    item: Dict[str, Any],
+    story_end: float | None,
+    *,
+    trim_crossing: bool = False,
+) -> Dict[str, Any]:
+    cur = dict(item)
+    start = float(cur.get("start", 0.0) or 0.0)
+    end = float(cur.get("end", start) or start)
+    original_metrics = _build_story_end_metrics(start, end, story_end)
+
+    cur.setdefault("story_end_trimmed", False)
+    if trim_crossing:
+        trimmed_start, trimmed_end, trimmed = _clip_range_before_story_end(start, end, story_end)
+        if trimmed:
+            cur["story_end_trimmed"] = True
+            cur["story_end_original_start"] = round(start, 3)
+            cur["story_end_original_end"] = round(end, 3)
+            cur["story_end_original_overlap_duration"] = original_metrics["story_end_overlap_duration"]
+            cur["story_end_original_overlap_ratio"] = original_metrics["story_end_overlap_ratio"]
+            cur["story_end_original_after_story_end"] = original_metrics["after_story_end"]
+            cur["story_end_original_crosses_boundary"] = original_metrics["crosses_story_end_boundary"]
+            cur["start"] = trimmed_start
+            cur["end"] = trimmed_end
+
+    start = float(cur.get("start", start) or start)
+    end = float(cur.get("end", end) or end)
+    cur.update(_build_story_end_metrics(start, end, story_end))
+    cur["story_end"] = round(float(story_end), 3) if story_end is not None else None
+    return cur
+
+
 def _collect_highlight_ranges(range_items: List[Dict[str, Any]], prologue_end: float | None) -> List[Dict[str, Any]]:
     highlight_ranges = []
     for item in range_items or []:
@@ -894,6 +1763,29 @@ def _collect_highlight_ranges(range_items: List[Dict[str, Any]], prologue_end: f
     return highlight_ranges
 
 
+def _clip_highlight_ranges_to_story_window(
+    highlight_ranges: List[Dict[str, Any]],
+    story_end: float | None,
+) -> List[Dict[str, Any]]:
+    if story_end is None:
+        return list(highlight_ranges or [])
+
+    clipped: List[Dict[str, Any]] = []
+    for item in highlight_ranges or []:
+        start = round(float(item.get("start", 0.0) or 0.0), 3)
+        end = round(float(item.get("end", start) or start), 3)
+        if start >= story_end - 0.05:
+            continue
+        end = round(min(end, story_end), 3)
+        if end <= start:
+            continue
+        cur = dict(item)
+        cur["start"] = start
+        cur["end"] = end
+        clipped.append(cur)
+    return clipped
+
+
 def _apply_full_subtitle_plan_to_chunks(
     plot_chunks: List[Dict[str, Any]],
     full_subtitle_understanding: Dict[str, Any],
@@ -902,16 +1794,19 @@ def _apply_full_subtitle_plan_to_chunks(
         return []
 
     prologue_end = _parse_prompt_time(full_subtitle_understanding.get("prologue_end_time"))
+    story_end = _parse_prompt_time(full_subtitle_understanding.get("story_end_time"))
     highlight_ranges = _collect_highlight_ranges(
         list(full_subtitle_understanding.get("highlight_windows") or []),
         prologue_end,
     )
+    highlight_ranges = _clip_highlight_ranges_to_story_window(highlight_ranges, story_end)
 
     annotated: List[Dict[str, Any]] = []
     keep_indices = set()
     total = len(plot_chunks)
     for idx, chunk in enumerate(plot_chunks):
         cur = _annotate_prologue_state(chunk, prologue_end, trim_crossing=True)
+        cur = _annotate_story_end_state(cur, story_end, trim_crossing=True)
         start = float(cur.get("start", 0.0) or 0.0)
         end = float(cur.get("end", start) or start)
         overlaps = [r for r in highlight_ranges if _ranges_overlap(start, end, r["start"], r["end"], 2.0)]
@@ -919,6 +1814,11 @@ def _apply_full_subtitle_plan_to_chunks(
         cur["llm_window_reasons"] = [r["reason"] for r in overlaps]
         cur["llm_window_categories"] = [r["category"] for r in overlaps if r["category"]]
         cur["llm_chunk_boost"] = 1.0 if overlaps else 0.0
+        if cur.get("after_story_end"):
+            cur["llm_window_selected"] = False
+            cur["llm_window_reasons"] = ["suppressed_by_story_end_boundary"]
+            cur["llm_window_categories"] = []
+            cur["llm_chunk_boost"] = 0.0
         if overlaps:
             if any(r.get("raw_voice_priority") == "high" for r in overlaps):
                 cur["raw_voice_retain_suggestion"] = True
@@ -929,6 +1829,8 @@ def _apply_full_subtitle_plan_to_chunks(
     for idx, chunk in enumerate(annotated):
         importance = str(chunk.get("importance_level") or "medium")
         plot_role = str(chunk.get("plot_role") or "")
+        if chunk.get("after_story_end"):
+            continue
         keep = bool(chunk.get("llm_window_selected"))
         if not keep and not chunk.get("before_prologue_end") and importance == "high":
             keep = True
@@ -937,16 +1839,23 @@ def _apply_full_subtitle_plan_to_chunks(
         if keep:
             keep_indices.add(idx)
             if idx > 0:
-                keep_indices.add(idx - 1)
+                prev = annotated[idx - 1]
+                if not prev.get("after_story_end"):
+                    keep_indices.add(idx - 1)
             if idx + 1 < total:
-                keep_indices.add(idx + 1)
+                nxt = annotated[idx + 1]
+                if not nxt.get("after_story_end"):
+                    keep_indices.add(idx + 1)
 
     filtered = []
     for idx, chunk in enumerate(annotated):
+        if chunk.get("after_story_end"):
+            continue
         if idx in keep_indices or not highlight_ranges:
             filtered.append(chunk)
 
-    return filtered or annotated
+    non_tail = [chunk for chunk in annotated if not chunk.get("after_story_end")]
+    return filtered or non_tail or annotated
 
 
 def _apply_llm_highlight_plan(
@@ -967,14 +1876,17 @@ def _apply_llm_highlight_plan(
     }
 
     prologue_end = _parse_prompt_time(full_subtitle_understanding.get("prologue_end_time"))
+    story_end = _parse_prompt_time(full_subtitle_understanding.get("story_end_time"))
     highlight_ranges = _collect_highlight_ranges(
         list(full_subtitle_understanding.get("highlight_windows") or []) + list(llm_highlight_plan.get("must_keep_ranges") or []),
         prologue_end,
     )
+    highlight_ranges = _clip_highlight_ranges_to_story_window(highlight_ranges, story_end)
 
     enriched: List[Dict[str, Any]] = []
     for pkg in scene_evidence:
         cur = _annotate_prologue_state(pkg, prologue_end, trim_crossing=True)
+        cur = _annotate_story_end_state(cur, story_end, trim_crossing=True)
         seg_id = str(cur.get("segment_id") or "")
         start = float(cur.get("start", 0.0) or 0.0)
         end = float(cur.get("end", start) or start)
@@ -992,11 +1904,16 @@ def _apply_llm_highlight_plan(
         if cur.get("before_prologue_end"):
             llm_selected = False
             raw_voice_keep = False
+        if cur.get("after_story_end"):
+            llm_selected = False
+            raw_voice_keep = False
 
         cur["llm_highlight_selected"] = llm_selected
         cur["llm_highlight_rejected"] = llm_rejected
         if cur.get("before_prologue_end"):
             cur["llm_highlight_reason"] = "suppressed_by_prologue_boundary"
+        elif cur.get("after_story_end"):
+            cur["llm_highlight_reason"] = "suppressed_by_story_end_boundary"
         else:
             cur["llm_highlight_reason"] = selection_notes.get(seg_id) or "; ".join(r["reason"] for r in overlapping[:3])
         cur["llm_highlight_window_count"] = len(overlapping)
@@ -1024,11 +1941,11 @@ def _final_story_score(pkg: Dict, index: int, total: int) -> float:
     else:
         score -= 0.8
 
-    if plot_function in {"反转", "情感爆发", "结局收束", "冲突升级"}:
+    if plot_function in {"\u53cd\u8f6c", "\u60c5\u611f\u7206\u53d1", "\u7ed3\u5c40\u6536\u675f", "\u51b2\u7a81\u5347\u7ea7"}:
         score += 1.8
-    elif plot_function in {"信息揭露"}:
+    elif plot_function in {"\u4fe1\u606f\u63ed\u9732"}:
         score += 0.8
-    elif plot_function in {"铺垫", "节奏缓冲"}:
+    elif plot_function in {"\u94fa\u57ab", "\u8282\u594f\u7f13\u51b2"}:
         score -= 1.0
 
     if block_type in {"action", "emotion", "visual"}:
@@ -1060,6 +1977,8 @@ def _final_story_score(pkg: Dict, index: int, total: int) -> float:
         score += 0.8
     if pkg.get("before_prologue_end") and not pkg.get("llm_highlight_selected"):
         score -= 2.0
+    if pkg.get("after_story_end"):
+        score -= 3.0
 
     if duration >= 40.0:
         score -= 0.6
@@ -1068,7 +1987,7 @@ def _final_story_score(pkg: Dict, index: int, total: int) -> float:
 
     if len(text.strip()) < 10:
         score -= 0.5
-    if index <= max(1, int(total * 0.12)) and plot_function == "铺垫":
+    if index <= max(1, int(total * 0.12)) and plot_function == "\u94fa\u57ab":
         score -= 1.5
 
     return round(score, 3)
@@ -1096,23 +2015,27 @@ def _select_final_story_evidence(scene_evidence: List[Dict]) -> List[Dict]:
 
         hard_keep = (
             importance == "high"
-            or plot_function in {"反转", "情感爆发", "结局收束"}
+            or plot_function in {"\u53cd\u8f6c", "\u60c5\u611f\u7206\u53d1", "\u7ed3\u5c40\u6536\u675f"}
             or item.get("raw_voice_retain_suggestion")
             or item.get("llm_highlight_selected")
         )
         should_drop = (
             score < 0.9
             and importance == "low"
-            and plot_function in {"铺垫", "节奏缓冲"}
+            and plot_function in {"\u94fa\u57ab", "\u8282\u594f\u7f13\u51b2"}
             and block_type in {"transition", "dialogue"}
         )
         if item.get("before_prologue_end") and not item.get("llm_highlight_selected"):
+            hard_keep = False
+        if item.get("after_story_end"):
             hard_keep = False
         if validator_status == "risky" and importance != "high":
             should_drop = True
         if item.get("llm_highlight_rejected") and importance != "high":
             should_drop = True
         if item.get("before_prologue_end") and not item.get("llm_highlight_selected"):
+            should_drop = True
+        if item.get("after_story_end"):
             should_drop = True
 
         selected = hard_keep or (score >= 1.6 and not should_drop)
@@ -1130,8 +2053,8 @@ def _select_final_story_evidence(scene_evidence: List[Dict]) -> List[Dict]:
             if (
                 not prev.get("before_prologue_end")
                 and not prev.get("prologue_original_before_prologue_end")
-                and
-                str(prev.get("importance_level") or "low") != "low"
+                and not prev.get("after_story_end")
+                and str(prev.get("importance_level") or "low") != "low"
                 and str((prev.get("story_validation") or {}).get("validator_status") or "pass") != "risky"
             ):
                 keep_indices.add(idx - 1)
@@ -1140,15 +2063,17 @@ def _select_final_story_evidence(scene_evidence: List[Dict]) -> List[Dict]:
             if (
                 not nxt.get("before_prologue_end")
                 and not nxt.get("prologue_original_before_prologue_end")
-                and
-                str(nxt.get("importance_level") or "low") != "low"
+                and not nxt.get("after_story_end")
+                and str(nxt.get("importance_level") or "low") != "low"
                 and str((nxt.get("story_validation") or {}).get("validator_status") or "pass") != "risky"
             ):
                 keep_indices.add(idx + 1)
 
-    selected = []
+    selected: List[Dict] = []
     for idx, item in enumerate(scored):
         if item.get("before_prologue_end") and not item.get("llm_highlight_selected"):
+            continue
+        if item.get("after_story_end"):
             continue
         if idx in keep_indices:
             item["selected_for_final_story"] = True
@@ -1159,23 +2084,58 @@ def _select_final_story_evidence(scene_evidence: List[Dict]) -> List[Dict]:
         fallback_candidates = [
             item
             for item in scored
-            if not item.get("before_prologue_end") and not item.get("prologue_original_before_prologue_end")
+            if (
+                not item.get("before_prologue_end")
+                and not item.get("prologue_original_before_prologue_end")
+                and not item.get("after_story_end")
+            )
         ]
         if not fallback_candidates:
-            fallback_candidates = [item for item in scored if not item.get("before_prologue_end")]
+            fallback_candidates = [
+                item for item in scored if not item.get("before_prologue_end") and not item.get("after_story_end")
+            ]
         fallback = sorted(
             fallback_candidates,
-            key=lambda x: x.get("final_story_score", 0.0),
+            key=lambda x: float(x.get("final_story_score", 0.0) or 0.0),
             reverse=True,
         )[: min(5, len(fallback_candidates))]
-        selected_ids = {x.get("segment_id") for x in fallback}
-        selected = [item for item in scored if item.get("segment_id") in selected_ids]
+        if fallback:
+            selected = sorted(
+                fallback,
+                key=lambda x: float(x.get("start", 0.0) or 0.0),
+            )
+            for item in selected:
+                item["selected_for_final_story"] = True
+                item["final_story_drop_reason"] = ""
+
+    if not selected:
+        relaxed_fallback = [item for item in scored if not item.get("after_story_end")]
+        if not relaxed_fallback:
+            relaxed_fallback = list(scored)
+        relaxed_fallback = sorted(
+            relaxed_fallback,
+            key=lambda x: (
+                bool(x.get("llm_highlight_selected")),
+                bool(x.get("raw_voice_retain_suggestion")),
+                float(x.get("final_story_score", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )[: min(max(3, min(5, total)), len(relaxed_fallback))]
+        selected = sorted(
+            relaxed_fallback,
+            key=lambda x: float(x.get("start", 0.0) or 0.0),
+        )
         for item in selected:
             item["selected_for_final_story"] = True
             item["final_story_drop_reason"] = ""
+        logger.warning(
+            "\u6700\u7ec8\u8bc1\u636e\u7b5b\u9009\u89e6\u53d1\u653e\u5bbd\u5160\u5e95: raw=%s, selected=%s",
+            total,
+            len(selected),
+        )
 
     logger.info(
-        "最终证据筛选完成: raw=%s, selected=%s, dropped=%s",
+        "\u6700\u7ec8\u8bc1\u636e\u7b5b\u9009\u5b8c\u6210: raw=%s, selected=%s, dropped=%s",
         total,
         len(selected),
         max(total - len(selected), 0),
@@ -1239,6 +2199,10 @@ def _run(
         full_subtitle_understanding=full_subtitle_understanding,
         subtitle_segments=segments,
         scene_overrides=scene_overrides,
+    )
+    full_subtitle_understanding, tail_warnings = _resolve_story_end_from_tail_markers(
+        full_subtitle_understanding=full_subtitle_understanding,
+        subtitle_segments=segments,
     )
 
     progress(22, "检测视频候选边界...")
@@ -1352,10 +2316,44 @@ def _run(
         scene_cut_points,
         highlight_selectivity=highlight_selectivity,
     )
+    highlight_frame_records: List[Dict[str, Any]] = []
+    if highlight_only and story_highlights and effective_visual_mode != "off":
+        progress(84, "为高光片段抽取代表帧...")
+        highlight_frame_output_dir = os.path.join(utils.temp_dir("story_highlight_frames"), utils.md5(video_path))
+        os.makedirs(highlight_frame_output_dir, exist_ok=True)
+        highlight_frame_records = extract_representative_frames_for_scenes(
+            video_path=video_path,
+            scenes=_prepare_highlight_frame_targets(story_highlights),
+            visual_mode=effective_visual_mode,
+            output_dir=highlight_frame_output_dir,
+            max_frames_dialogue=3,
+            max_frames_visual_only=4,
+            max_frames_long_scene=4,
+            long_scene_threshold=18.0,
+        )
+        logger.info("高光片段代表帧抽取完成: {} 张", len(highlight_frame_records))
+    highlight_narration_segments = _build_highlight_narration_segments(
+        story_highlights=story_highlights,
+        scene_evidence=scene_evidence,
+        highlight_frame_records=highlight_frame_records,
+        global_summary=global_summary,
+    )
+    full_subtitle_understanding = _ensure_full_subtitle_highlight_windows(
+        full_subtitle_understanding=full_subtitle_understanding,
+        llm_highlight_plan=llm_highlight_plan,
+        story_highlights=story_highlights,
+    )
+    global_summary["full_subtitle_understanding"] = full_subtitle_understanding
+    if full_subtitle_understanding.get("highlight_windows_backfilled"):
+        logger.warning(
+            "整字幕高光窗口缺失，已使用后续链路结果回填: source={}, count={}",
+            full_subtitle_understanding.get("highlight_windows_source"),
+            len(full_subtitle_understanding.get("highlight_windows") or []),
+        )
 
     progress(88, "生成影视解说脚本..." if not highlight_only else "生成高光验证脚本...")
     if highlight_only:
-        script_items = _build_highlight_only_script(story_highlights)
+        script_items = _build_highlight_only_script(highlight_narration_segments)
     else:
         script_items = generate_narration_from_scene_evidence(
             scene_evidence=scene_evidence,
@@ -1384,7 +2382,9 @@ def _run(
         highlight_selectivity=highlight_selectivity,
     )
 
-    warnings: List[str] = list(prologue_warnings)
+    warnings: List[str] = list(prologue_warnings) + list(tail_warnings)
+    if full_subtitle_understanding.get("highlight_windows_backfilled"):
+        warnings.append(f"highlight_windows_backfilled:{full_subtitle_understanding.get('highlight_windows_source')}")
     try:
         validate_script_items(script_items)
     except PreflightError as exc:
@@ -1408,6 +2408,10 @@ def _run(
     with open(highlight_script_path, "w", encoding="utf-8") as f:
         json.dump(script_items, f, ensure_ascii=False, indent=2)
 
+    highlight_narration_segments_path = output_script_path.replace(".json", "_highlight_narration_segments.json")
+    with open(highlight_narration_segments_path, "w", encoding="utf-8") as f:
+        json.dump(highlight_narration_segments, f, ensure_ascii=False, indent=2)
+
     audit_path = output_script_path.replace(".json", "_audit.json")
     audit_payload = _build_story_audit_payload(
         video_path=video_path,
@@ -1418,10 +2422,13 @@ def _run(
         plot_chunks=plot_chunks,
         selected_scene_evidence=scene_evidence,
         story_highlights=story_highlights,
+        highlight_narration_segments=highlight_narration_segments,
         llm_highlight_plan=llm_highlight_plan,
         script_items=script_items,
         scene_cut_points=scene_cut_points,
         video_boundary_candidates=video_boundary_candidates,
+        frame_records=frame_records,
+        highlight_frame_records=highlight_frame_records,
         quality_issues=quality_issues,
         warnings=warnings,
     )
@@ -1438,12 +2445,14 @@ def _run(
         "composition_script_path": highlight_script_path,
         "highlights_path": highlights_path,
         "highlight_script_path": highlight_script_path,
+        "highlight_narration_segments_path": highlight_narration_segments_path,
         "highlight_only_ready": True,
         "highlight_only_mode": highlight_only,
         "audit_path": audit_path,
         "evidence": scene_evidence,
         "selected_scene_evidence": scene_evidence,
         "story_highlights": story_highlights,
+        "highlight_narration_segments": highlight_narration_segments,
         "full_subtitle_understanding": full_subtitle_understanding,
         "llm_highlight_plan": llm_highlight_plan,
         "global_summary": global_summary,
@@ -1469,6 +2478,7 @@ def _run(
         "video_boundary_candidates": video_boundary_candidates,
         "video_boundary_candidate_count": len(video_boundary_candidates),
         "frame_records": frame_records,
+        "highlight_frame_records": highlight_frame_records,
         "story_validation": [x.get("story_validation") for x in scene_evidence if x.get("story_validation")],
         "warnings": warnings,
         "success": True,

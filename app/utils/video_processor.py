@@ -657,8 +657,11 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
-    # 使用示例
-    processor = VideoProcessor("./resource/videos/test.mp4")
+    sample_video = os.path.join(os.getcwd(), "demo.mp4")
+    if not os.path.exists(sample_video):
+        raise SystemExit("Place a demo.mp4 next to the repo root to run this manual example.")
+
+    processor = VideoProcessor(sample_video)
 
     # 设置间隔为3秒提取帧
     processor.process_video_pipeline(

@@ -181,7 +181,7 @@ def _analyze_selected_frames(selected_frame_paths):
 
 
 def _save_analysis(scene_evidence, raw_results):
-    analysis_dir = os.path.join(utils.storage_dir(), "temp", "analysis")
+    analysis_dir = utils.analysis_dir("json")
     os.makedirs(analysis_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(analysis_dir, f"scene_evidence_{now}.json")

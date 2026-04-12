@@ -9,6 +9,8 @@ from openai import OpenAI
 import requests
 import time
 
+from app.utils import utils
+
 
 class BaseGenerator:
     def __init__(self, model_name: str, api_key: str, prompt: str):
@@ -628,8 +630,8 @@ class ScriptProcessor:
                 current_time += duration
 
             # 保存结果
-            file_name = f"storage/json/step2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            os.makedirs(os.path.dirname(file_name), exist_ok=True)
+            output_dir = utils.analysis_dir("json")
+            file_name = os.path.join(output_dir, f"step2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
 
             with open(file_name, 'w', encoding='utf-8') as file:
                 json.dump(frame_content_list, file, ensure_ascii=False, indent=4)

@@ -4,26 +4,29 @@ import glob
 import importlib
 import json
 import os
-import time
 import traceback
 
 import streamlit as st
 from loguru import logger
 
 from app.config import config
-from app.models.schema import VideoAspect, VideoClipParams
+from app.models.schema import VideoAspect
 from app.services.subtitle_text import decode_subtitle_bytes
 from app.services.timeline_allocator import fit_check
-from app.utils import check_script, utils
+from app.utils import utils
 from webui.components.subtitle_first_mode_panel import render_subtitle_first_mode_panel
-from webui.tools.generate_highlight_edit import generate_highlight_edit
-from webui.tools.generate_short_summary import generate_script_short_sunmmary
+from webui.services.script_persistence import save_script_with_validation
+from webui.services.script_actions import (
+    MODE_FILE,
+    MODE_HIGHLIGHT_EDIT,
+    MODE_SHORT,
+    MODE_SHORT_SUMMARY,
+    MODE_SUBTITLE_FIRST,
+    get_script_action_label,
+    run_script_action,
+)
+from webui.utils import file_utils
 
-MODE_FILE = "file_selection"
-MODE_SHORT = "short"
-MODE_SHORT_SUMMARY = "short_summary"
-MODE_SUBTITLE_FIRST = "summary"
-MODE_HIGHLIGHT_EDIT = "highlight_edit"
 PENDING_SUBTITLE_SOURCE_MODE_KEY = "_pending_subtitle_source_mode"
 
 OST_OPTIONS = [0, 1, 2]
@@ -70,22 +73,6 @@ def _uploaded_file_fingerprint(uploaded_file) -> str:
         return ""
     size = getattr(uploaded_file, "size", None)
     return f"{uploaded_file.name}:{size}"
-
-
-def _save_uploaded_file_in_chunks(uploaded_file, destination_path: str, chunk_size: int = 16 * 1024 * 1024) -> None:
-    # Avoid creating a second full in-memory copy when persisting large uploads.
-    if hasattr(uploaded_file, "seek"):
-        uploaded_file.seek(0)
-
-    with open(destination_path, "wb") as f:
-        while True:
-            chunk = uploaded_file.read(chunk_size)
-            if not chunk:
-                break
-            f.write(chunk)
-
-    if hasattr(uploaded_file, "seek"):
-        uploaded_file.seek(0)
 
 
 def _lazy_import_short_mix_generator(tr):
@@ -239,18 +226,17 @@ def render_script_file_selector(tr):
                     script_content = uploaded_file.read().decode("utf-8")
                     json_data = json.loads(script_content)
 
-                    safe_filename = os.path.basename(uploaded_file.name)
-                    script_file_path = os.path.join(script_dir, safe_filename)
-                    file_name, file_extension = os.path.splitext(safe_filename)
-                    if os.path.exists(script_file_path):
-                        timestamp = time.strftime("%Y%m%d%H%M%S")
-                        script_file_path = os.path.join(
-                            script_dir,
-                            f"{file_name}_{timestamp}{file_extension}",
-                        )
-
-                    with open(script_file_path, "w", encoding="utf-8") as f:
-                        json.dump(json_data, f, ensure_ascii=False, indent=2)
+                    script_file_path = file_utils.save_json_file(
+                        json_data,
+                        script_dir,
+                        uploaded_file.name,
+                        ensure_ascii=False,
+                        indent=2,
+                        default_stem="script",
+                        default_ext=".json",
+                    )
+                    if not script_file_path:
+                        raise RuntimeError(tr("Upload failed"))
 
                     st.session_state["_last_uploaded_script_fp"] = current_fp
                     st.session_state["video_clip_json_path"] = script_file_path
@@ -321,8 +307,9 @@ def render_video_file(tr):
         tr(
             "Browser upload of very large videos may fail even if the configured limit is 30G. "
             "Streamlit buffers uploads in memory. For very large files, copy them to "
-            "./resource/videos and then use Select Existing Video."
+            "the workspace videos directory and then use Select Existing Video."
         )
+        + f" ({utils.video_dir()})"
     )
 
     uploaded_file = st.file_uploader(
@@ -334,22 +321,18 @@ def render_video_file(tr):
     if uploaded_file is not None:
         current_fp = _uploaded_file_fingerprint(uploaded_file)
         if current_fp != st.session_state.get("_last_uploaded_video_fp", ""):
-            safe_filename = os.path.basename(uploaded_file.name)
-            video_file_path = os.path.join(utils.video_dir(), safe_filename)
-            file_name, file_extension = os.path.splitext(safe_filename)
-
-            if os.path.exists(video_file_path):
-                timestamp = time.strftime("%Y%m%d%H%M%S")
-                video_file_path = os.path.join(
-                    utils.video_dir(),
-                    f"{file_name}_{timestamp}{file_extension}",
-                )
-
-            _save_uploaded_file_in_chunks(uploaded_file, video_file_path)
-
-            st.session_state["_last_uploaded_video_fp"] = current_fp
-            st.session_state["video_origin_path"] = video_file_path
-            st.success(tr("File Uploaded Successfully"))
+            video_file_path = file_utils.save_uploaded_file(
+                uploaded_file,
+                utils.video_dir(),
+                allowed_types=[".mp4", ".mov", ".avi", ".flv", ".mkv"],
+                default_stem="video",
+            )
+            if video_file_path:
+                st.session_state["_last_uploaded_video_fp"] = current_fp
+                st.session_state["video_origin_path"] = video_file_path
+                st.success(tr("File Uploaded Successfully"))
+            else:
+                st.error(tr("Upload failed"))
 
 
 def _render_subtitle_source_panel(prefix: str, tr, allow_auto: bool):
@@ -389,7 +372,7 @@ def _render_subtitle_source_panel(prefix: str, tr, allow_auto: bool):
 
     if source_mode == "existing_subtitle":
         subtitle_list = [(tr("None"), "")]
-        subtitle_dir = utils.subtitle_dir() if hasattr(utils, "subtitle_dir") else utils.temp_dir()
+        subtitle_dir = utils.subtitle_dir()
         for suffix in ["*.srt", "*.ass", "*.ssa", "*.vtt"]:
             for file in glob.glob(os.path.join(subtitle_dir, suffix)):
                 display_name = file.replace(config.root_dir, "")
@@ -436,7 +419,6 @@ def _render_subtitle_source_panel(prefix: str, tr, allow_auto: bool):
             fp_key = f"_{prefix}_last_uploaded_subtitle_fp"
             if current_fp != st.session_state.get(fp_key, ""):
                 try:
-                    safe_filename = os.path.basename(subtitle_file.name)
                     decoded = decode_subtitle_bytes(subtitle_file.getvalue())
                     subtitle_content = decoded.text
                     detected_encoding = decoded.encoding
@@ -445,20 +427,18 @@ def _render_subtitle_source_panel(prefix: str, tr, allow_auto: bool):
                         st.error(tr("Unable to read subtitle file, please check encoding"))
                         st.stop()
 
-                    subtitle_dir = utils.subtitle_dir() if hasattr(utils, "subtitle_dir") else utils.temp_dir()
-                    os.makedirs(subtitle_dir, exist_ok=True)
+                    subtitle_dir = utils.subtitle_dir()
 
-                    subtitle_file_path = os.path.join(subtitle_dir, safe_filename)
-                    file_name, file_extension = os.path.splitext(safe_filename)
-                    if os.path.exists(subtitle_file_path):
-                        timestamp = time.strftime("%Y%m%d%H%M%S")
-                        subtitle_file_path = os.path.join(
-                            subtitle_dir,
-                            f"{file_name}_{timestamp}{file_extension}",
-                        )
-
-                    with open(subtitle_file_path, "w", encoding="utf-8") as f:
-                        f.write(subtitle_content)
+                    subtitle_file_path = file_utils.save_text_file(
+                        subtitle_content,
+                        subtitle_dir,
+                        subtitle_file.name,
+                        encoding="utf-8",
+                        default_stem="subtitle",
+                        default_ext=".srt",
+                    )
+                    if not subtitle_file_path:
+                        raise RuntimeError(tr("Upload failed"))
 
                     st.session_state[fp_key] = current_fp
                     st.session_state[path_key] = subtitle_file_path
@@ -658,7 +638,7 @@ def render_subtitle_first_generate_panel(tr):
 
     if subtitle_source_mode == "existing_subtitle":
         subtitle_list = [(tr("None"), "")]
-        subtitle_dir = utils.subtitle_dir() if hasattr(utils, "subtitle_dir") else utils.temp_dir()
+        subtitle_dir = utils.subtitle_dir()
         for suffix in ["*.srt", "*.ass", "*.ssa", "*.vtt"]:
             for file in glob.glob(os.path.join(subtitle_dir, suffix)):
                 display_name = file.replace(config.root_dir, "")
@@ -708,7 +688,6 @@ def render_subtitle_first_generate_panel(tr):
             last_fp = st.session_state.get("_last_uploaded_subtitle_fp", "")
             if current_fp != last_fp:
                 try:
-                    safe_filename = os.path.basename(subtitle_file.name)
                     decoded = decode_subtitle_bytes(subtitle_file.getvalue())
                     subtitle_content = decoded.text
                     detected_encoding = decoded.encoding
@@ -717,20 +696,18 @@ def render_subtitle_first_generate_panel(tr):
                         st.error(tr("Unable to read subtitle file, please check encoding"))
                         st.stop()
 
-                    subtitle_dir = utils.subtitle_dir() if hasattr(utils, "subtitle_dir") else utils.temp_dir()
-                    os.makedirs(subtitle_dir, exist_ok=True)
+                    subtitle_dir = utils.subtitle_dir()
 
-                    subtitle_file_path = os.path.join(subtitle_dir, safe_filename)
-                    file_name, file_extension = os.path.splitext(safe_filename)
-                    if os.path.exists(subtitle_file_path):
-                        timestamp = time.strftime("%Y%m%d%H%M%S")
-                        subtitle_file_path = os.path.join(
-                            subtitle_dir,
-                            f"{file_name}_{timestamp}{file_extension}",
-                        )
-
-                    with open(subtitle_file_path, "w", encoding="utf-8") as f:
-                        f.write(subtitle_content)
+                    subtitle_file_path = file_utils.save_text_file(
+                        subtitle_content,
+                        subtitle_dir,
+                        subtitle_file.name,
+                        encoding="utf-8",
+                        default_stem="subtitle",
+                        default_ext=".srt",
+                    )
+                    if not subtitle_file_path:
+                        raise RuntimeError(tr("Upload failed"))
 
                     st.session_state["subtitle_path"] = subtitle_file_path
                     st.session_state["subtitle_content"] = subtitle_content
@@ -771,84 +748,14 @@ def render_subtitle_first_generate_panel(tr):
 
 def render_script_buttons(tr):
     script_mode = st.session_state.get("video_clip_json_path", "")
-
-    if script_mode == MODE_SHORT:
-        button_name = tr("Generate Short Video Script")
-    elif script_mode == MODE_SHORT_SUMMARY:
-        button_name = tr("Generate Short Drama Summary Script")
-    elif script_mode == MODE_SUBTITLE_FIRST:
-        if st.session_state.get("subtitle_source_mode") == "auto_subtitle":
-            button_name = tr("Auto Generate Subtitle and Script")
-        else:
-            button_name = tr("Generate Subtitle-First Script")
-    elif script_mode == MODE_HIGHLIGHT_EDIT:
-        button_name = tr("Generate Highlight Edit Script")
-    elif isinstance(script_mode, str) and script_mode.endswith("json"):
-        button_name = tr("Load Video Script")
-    else:
-        button_name = tr("Please Select Script File")
+    button_name = get_script_action_label(tr, script_mode)
 
     if st.button(button_name, key="script_action", disabled=not script_mode):
-        params = VideoClipParams()
-        params.video_clip_json_path = script_mode
-        params.video_origin_path = st.session_state.get("video_origin_path", "")
-
-        if script_mode == MODE_SHORT:
-            subtitle_mode = st.session_state.get("short_subtitle_source_mode", "existing_subtitle")
-            subtitle_path = st.session_state.get("short_subtitle_path", "")
-            st.session_state["subtitle_path"] = subtitle_path
-            st.session_state["subtitle_content"] = st.session_state.get("short_subtitle_content")
-            if subtitle_mode != "auto_subtitle" and (not subtitle_path or not os.path.exists(subtitle_path)):
-                st.error(tr("Short mix requires subtitle input or auto subtitle"))
-                return
-
-            generate_script_short = _lazy_import_short_mix_generator(tr)
-            if generate_script_short is None:
-                return
-
-            generate_script_short(
-                tr,
-                params,
-                custom_clips=int(st.session_state.get("short_custom_clips", 5)),
-            )
-
-        elif script_mode == MODE_SHORT_SUMMARY:
-            subtitle_path = st.session_state.get("short_summary_subtitle_path", "")
-            if not subtitle_path or not os.path.exists(subtitle_path):
-                st.error(tr("Short drama summary requires subtitle file"))
-                return
-            st.session_state["subtitle_path"] = subtitle_path
-            st.session_state["subtitle_content"] = st.session_state.get("short_summary_subtitle_content")
-            generate_script_short_sunmmary(
-                params,
-                subtitle_path,
-                st.session_state.get("short_summary_name", ""),
-                float(st.session_state.get("short_summary_temperature", 0.7)),
-            )
-
-        elif script_mode == MODE_SUBTITLE_FIRST:
-            subtitle_mode = st.session_state.get("subtitle_source_mode", "existing_subtitle")
-            subtitle_path = st.session_state.get("subtitle_path", "")
-            if subtitle_mode != "auto_subtitle" and (not subtitle_path or not os.path.exists(subtitle_path)):
-                st.error(tr("Subtitle file does not exist"))
-                return
-
-            video_theme = st.session_state.get("short_name") or st.session_state.get("video_theme", "")
-            temperature = st.session_state.get("temperature", 0.7)
-            generate_script_short_sunmmary(params, subtitle_path, video_theme, temperature)
-
-        elif script_mode == MODE_HIGHLIGHT_EDIT:
-            subtitle_mode = st.session_state.get("highlight_subtitle_source_mode", "existing_subtitle")
-            subtitle_path = st.session_state.get("highlight_subtitle_path", "")
-            if subtitle_mode != "auto_subtitle" and subtitle_path and not os.path.exists(subtitle_path):
-                st.error(tr("Subtitle file does not exist"))
-                return
-            st.session_state["subtitle_path"] = subtitle_path
-            st.session_state["subtitle_content"] = st.session_state.get("highlight_subtitle_content")
-            generate_highlight_edit(tr, params)
-
-        else:
-            load_script(tr, script_mode)
+        run_script_action(
+            tr,
+            script_mode,
+            lazy_import_short_mix_generator=_lazy_import_short_mix_generator,
+        )
 
     video_clip_json_details = _render_script_editor(tr)
     _render_evidence_preview(tr)
@@ -1096,54 +1003,3 @@ def _parse_ts(value: str) -> float:
         return 0.0
     h, m, s = parts
     return int(h) * 3600 + int(m) * 60 + float(s)
-
-
-def load_script(tr, script_path: str):
-    try:
-        with open(script_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if isinstance(data, dict) and "items" in data:
-            data = data["items"]
-
-        if not isinstance(data, list):
-            st.error(tr("Invalid script format"))
-            return
-
-        st.session_state["video_clip_json"] = data
-        st.success(tr("Script loaded successfully"))
-    except Exception as e:
-        st.error(f"{tr('Load script failed')}: {str(e)}")
-        logger.error(traceback.format_exc())
-
-
-def save_script_with_validation(tr, video_clip_json_details):
-    try:
-        items = video_clip_json_details or st.session_state.get("video_clip_json", [])
-        if not items:
-            st.warning(tr("No script content to save"))
-            return
-
-        format_result = check_script.check_format(items)
-        if not format_result.get("success"):
-            st.warning(
-                f"{tr('Script format warning')}: "
-                f"{format_result.get('message', 'unknown')} | {format_result.get('details', '')}"
-            )
-
-        output_dir = utils.script_dir()
-        os.makedirs(output_dir, exist_ok=True)
-
-        timestamp = time.strftime("%Y%m%d%H%M%S")
-        file_name = f"script_{timestamp}.json"
-        save_path = os.path.join(output_dir, file_name)
-
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
-
-        st.session_state["video_clip_json_path"] = save_path
-        st.session_state["video_clip_json_path_selected"] = save_path
-        st.success(f"{tr('Script saved successfully')}: {save_path}")
-    except Exception as e:
-        st.error(f"{tr('Save script failed')}: {str(e)}")
-        logger.error(traceback.format_exc())

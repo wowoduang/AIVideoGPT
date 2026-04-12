@@ -14,7 +14,7 @@ import requests
 from typing import Dict, Any, Optional
 from loguru import logger
 from app.config import config
-from app.utils.utils import get_uuid, storage_dir
+from app.utils.utils import analysis_dir, get_uuid, storage_dir
 from app.services.subtitle_text import read_subtitle_text
 # 导入新的提示词管理系统
 from app.services.prompts import PromptManager
@@ -343,7 +343,7 @@ class SubtitleAnalyzer:
         try:
             # 如果未提供输出路径，则自动生成
             if not output_path:
-                output_dir = storage_dir("drama_analysis", create=True)
+                output_dir = analysis_dir("drama_analysis")
                 output_path = os.path.join(output_dir, f"analysis_{get_uuid(True)}.txt")
             
             # 确保目录存在
@@ -601,7 +601,7 @@ class SubtitleAnalyzer:
         try:
             # 如果未提供输出路径，则自动生成
             if not output_path:
-                output_dir = storage_dir("narration_scripts", create=True)
+                output_dir = analysis_dir("narration_scripts")
                 output_path = os.path.join(output_dir, f"narration_{get_uuid(True)}.json")
             
             # 确保目录存在
@@ -731,47 +731,4 @@ def generate_narration_script(
 
 
 if __name__ == '__main__':
-    text_api_key = "skxxxx"
-    text_model = "gemini-2.0-flash"
-    text_base_url = "https://api.narratoai.cn/v1/chat/completions"  # 确保URL不以斜杠结尾，便于后续拼接
-    subtitle_path = "/Users/apple/Desktop/home/NarratoAI/resource/srt/家里家外1-5.srt"
-    
-    # 示例用法
-    if subtitle_path:
-        # 分析字幕总结剧情
-        analysis_result = analyze_subtitle(
-            subtitle_file_path=subtitle_path,
-            api_key=text_api_key,
-            model=text_model,
-            base_url=text_base_url,
-            save_result=True
-        )
-        
-        if analysis_result["status"] == "success":
-            print("字幕分析成功！")
-            print("分析结果：")
-            print(analysis_result["analysis"])
-
-            # 读取原始字幕内容用于解说脚本生成
-            with open(subtitle_path, 'r', encoding='utf-8') as f:
-                subtitle_content = f.read()
-
-            # 根据剧情生成解说文案
-            narration_result = generate_narration_script(
-                short_name="家里家外",
-                plot_analysis=analysis_result["analysis"],
-                subtitle_content=subtitle_content,
-                api_key=text_api_key,
-                model=text_model,
-                base_url=text_base_url,
-                save_result=True
-            )
-            
-            if narration_result["status"] == "success":
-                print("\n解说文案生成成功！")
-                print("解说文案：")
-                print(narration_result["narration_script"])
-            else:
-                print(f"\n解说文案生成失败: {narration_result['message']}")
-        else:
-            print(f"分析失败: {analysis_result['message']}")
+    print("Use the short-drama analysis helpers from the app workflow; legacy local-path demo data has been removed.")

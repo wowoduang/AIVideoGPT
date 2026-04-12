@@ -261,12 +261,38 @@ def _candidate_model_dirs(names: List[str]) -> List[str]:
     seen: set = set()
     for base in _base_dirs():
         for name in names:
-            if not name or "/" in name:
+            if not name:
                 continue
-            p = os.path.abspath(os.path.join(base, "app", "models", name))
-            if p not in seen:
-                seen.add(p)
-                dirs.append(p)
+            raw_name = str(name).strip()
+            if not raw_name:
+                continue
+
+            direct_candidates: List[str] = []
+            if os.path.isabs(raw_name):
+                direct_candidates.append(os.path.abspath(raw_name))
+            else:
+                normalized = raw_name.replace("/", os.sep).replace("\\", os.sep)
+                if os.path.sep in normalized:
+                    direct_candidates.append(os.path.abspath(os.path.join(utils.root_dir(), normalized)))
+                    direct_candidates.append(os.path.abspath(normalized))
+
+            for candidate in direct_candidates:
+                if candidate not in seen:
+                    seen.add(candidate)
+                    dirs.append(candidate)
+
+            if "/" in raw_name or "\\" in raw_name:
+                continue
+
+            base_candidates = [
+                os.path.abspath(os.path.join(base, "app", "models", raw_name)),
+                os.path.abspath(os.path.join(base, "models", raw_name)),
+                os.path.abspath(os.path.join(utils.model_dir(), raw_name)),
+            ]
+            for candidate in base_candidates:
+                if candidate not in seen:
+                    seen.add(candidate)
+                    dirs.append(candidate)
     return dirs
 
 
@@ -339,7 +365,8 @@ def _load_faster_whisper_model() -> bool:
             "https://huggingface.co/guillaumekln/faster-whisper-large-v3\n"
             "或：\n"
             "https://huggingface.co/guillaumekln/faster-whisper-large-v2\n\n"
-            "存放路径示例：app/models/faster-whisper-large-v3\n\n"
+            "存放路径示例：workspace/models/faster-whisper-large-v3\n"
+            "兼容旧路径：app/models/faster-whisper-large-v3\n\n"
             f"root_dir(): {utils.root_dir()}\n"
             f"cwd: {os.getcwd()}\n"
             f"executable: {sys.executable}\n\n"

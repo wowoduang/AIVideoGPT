@@ -19,6 +19,33 @@ def _ordered_unique(values: List) -> List:
     return list(dict.fromkeys(value for value in (values or []) if value not in (None, "")))
 
 
+def _effective_clip_bounds(item: Dict) -> tuple[float, float]:
+    clip_start = float(item.get("start", 0.0) or 0.0)
+    clip_end = float(item.get("end", clip_start) or clip_start)
+    reasons = set(str(value) for value in (item.get("selection_reason") or []))
+    peak_start = item.get("peak_window_start")
+    peak_end = item.get("peak_window_end")
+    if peak_start in (None, "") or peak_end in (None, ""):
+        return clip_start, max(clip_end, clip_start)
+
+    peak_start_value = float(peak_start)
+    peak_end_value = float(peak_end)
+    if peak_end_value <= peak_start_value:
+        return clip_start, max(clip_end, clip_start)
+
+    clip_duration = max(clip_end - clip_start, 0.0)
+    peak_duration = peak_end_value - peak_start_value
+    if peak_duration <= clip_duration + 0.35 and "peak_window" not in reasons:
+        return clip_start, max(clip_end, clip_start)
+
+    return min(clip_start, peak_start_value), max(clip_end, peak_end_value)
+
+
+def _effective_clip_duration(item: Dict) -> float:
+    start, end = _effective_clip_bounds(item)
+    return round(max(end - start, _MIN_CLIP_SECONDS), 3)
+
+
 def _merge_if_close(items: List[Dict], gap_threshold: float = _MERGE_GAP_SECONDS) -> List[Dict]:
     if not items:
         return []
@@ -62,6 +89,10 @@ def _merge_if_close(items: List[Dict], gap_threshold: float = _MERGE_GAP_SECONDS
             "relation_score",
             "narrative_overview_score",
             "group_reaction_score",
+            "peak_window_text_score",
+            "peak_window_dialogue_score",
+            "peak_window_payoff_score",
+            "peak_window_character_score",
             "solo_focus_score",
             "dialogue_exchange_score",
             "ensemble_scene_score",
@@ -104,6 +135,9 @@ def _merge_if_close(items: List[Dict], gap_threshold: float = _MERGE_GAP_SECONDS
         prev["pressure_target_names"] = _sorted_unique(
             list(prev.get("pressure_target_names") or []) + list(current.get("pressure_target_names") or [])
         )
+        prev["peak_window_clip_ids"] = _ordered_unique(
+            list(prev.get("peak_window_clip_ids") or []) + list(current.get("peak_window_clip_ids") or [])
+        )
         prev["prevent_merge"] = bool(prev.get("prevent_merge") or current.get("prevent_merge"))
         if not prev.get("primary_evidence") and current.get("primary_evidence"):
             prev["primary_evidence"] = current.get("primary_evidence")
@@ -117,6 +151,40 @@ def _merge_if_close(items: List[Dict], gap_threshold: float = _MERGE_GAP_SECONDS
             prev["scene_summary"] = str(current.get("scene_summary", "") or "")
         if len(str(current.get("subtitle_text", "") or "")) > len(str(prev.get("subtitle_text", "") or "")):
             prev["subtitle_text"] = str(current.get("subtitle_text", "") or "")
+        for field in ("peak_window_strength", "peak_window_duration"):
+            if current.get(field) in (None, ""):
+                continue
+            prev_value = prev.get(field)
+            if prev_value in (None, ""):
+                prev[field] = current.get(field)
+                continue
+            try:
+                prev[field] = round(max(float(prev_value), float(current.get(field))), 3)
+            except (TypeError, ValueError):
+                prev[field] = prev_value
+        peak_starts = [
+            float(value)
+            for value in (prev.get("peak_window_start"), current.get("peak_window_start"))
+            if value not in (None, "")
+        ]
+        peak_ends = [
+            float(value)
+            for value in (prev.get("peak_window_end"), current.get("peak_window_end"))
+            if value not in (None, "")
+        ]
+        if peak_starts:
+            prev["peak_window_start"] = round(min(peak_starts), 3)
+        if peak_ends:
+            prev["peak_window_end"] = round(max(peak_ends), 3)
+        if prev.get("peak_window_start") not in (None, "") and prev.get("peak_window_end") not in (None, ""):
+            prev["peak_window_duration"] = round(
+                max(
+                    float(prev.get("peak_window_duration", 0.0) or 0.0),
+                    float(prev.get("peak_window_end", 0.0) or 0.0)
+                    - float(prev.get("peak_window_start", 0.0) or 0.0),
+                ),
+                3,
+            )
     return merged
 
 

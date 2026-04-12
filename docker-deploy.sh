@@ -23,6 +23,14 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+docker_compose() {
+    if command -v docker-compose &> /dev/null; then
+        docker-compose "$@"
+    else
+        docker compose "$@"
+    fi
+}
+
 # 显示帮助信息
 show_help() {
     cat << EOF
@@ -78,6 +86,28 @@ check_config() {
     fi
 }
 
+setup_workspace() {
+    local workspace_root="${WORKSPACE_ROOT:-../AIVideoGPT-workspace}"
+    log_info "准备 Docker 工作区: ${workspace_root}"
+
+    mkdir -p \
+        "${workspace_root}/temp" \
+        "${workspace_root}/cache" \
+        "${workspace_root}/runtime" \
+        "${workspace_root}/state" \
+        "${workspace_root}/tasks" \
+        "${workspace_root}/models" \
+        "${workspace_root}/videos" \
+        "${workspace_root}/subtitles" \
+        "${workspace_root}/scripts" \
+        "${workspace_root}/fonts" \
+        "${workspace_root}/songs" \
+        "${workspace_root}/analysis" \
+        "${workspace_root}/analysis/json" \
+        "${workspace_root}/analysis/narration_scripts" \
+        "${workspace_root}/analysis/drama_analysis"
+}
+
 # 构建镜像
 build_image() {
     log_info "构建 Docker 镜像..."
@@ -87,15 +117,15 @@ build_image() {
         build_args="--no-cache"
     fi
 
-    docker-compose build $build_args
+    docker_compose build $build_args
 }
 
 # 启动服务
 start_services() {
     log_info "启动 NarratoAI 服务..."
 
-    docker-compose down 2>/dev/null || true
-    docker-compose up -d
+    docker_compose down 2>/dev/null || true
+    docker_compose up -d
 }
 
 # 等待服务就绪
@@ -106,7 +136,7 @@ wait_for_service() {
     local attempt=1
 
     while [ $attempt -le $max_attempts ]; do
-        if curl -f http://localhost:8501/_stcore/health &>/dev/null; then
+        if curl -f http://localhost:8866/_stcore/health &>/dev/null; then
             log_info "服务已就绪"
             return 0
         fi
@@ -123,12 +153,13 @@ wait_for_service() {
 show_deployment_info() {
     echo
     log_info "NarratoAI 部署完成！"
-    echo "访问地址: http://localhost:8501"
+    echo "访问地址: http://localhost:8866"
+    echo "工作区目录: ${WORKSPACE_ROOT:-../AIVideoGPT-workspace}"
     echo
     echo "常用命令:"
-    echo "  查看日志: docker-compose logs -f"
-    echo "  停止服务: docker-compose down"
-    echo "  重启服务: docker-compose restart"
+    echo "  查看日志: docker compose logs -f"
+    echo "  停止服务: docker compose down"
+    echo "  重启服务: docker compose restart"
 }
 
 # 主函数
@@ -164,6 +195,7 @@ main() {
 
     check_requirements
     check_config
+    setup_workspace
 
     if [ "$FORCE_BUILD" = "true" ] || ! docker images | grep -q "narratoai"; then
         build_image
@@ -175,7 +207,7 @@ main() {
         show_deployment_info
     else
         log_error "部署失败，请检查日志"
-        docker-compose logs --tail=20
+        docker_compose logs --tail=20
         exit 1
     fi
 }

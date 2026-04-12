@@ -197,7 +197,7 @@ def merge_materials(
     if AudioVolumeDefaults.ENABLE_SMART_VOLUME and audio_path and os.path.exists(audio_path) and original_audio is not None:
         try:
             normalizer = AudioNormalizer()
-            temp_dir = tempfile.mkdtemp()
+            temp_dir = tempfile.mkdtemp(dir=utils.temp_dir("generate_video"))
             temp_original_path = os.path.join(temp_dir, "temp_original.wav")
 
             # 保存原声到临时文件进行分析
@@ -477,35 +477,4 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
 
 
 if __name__ == '__main__':
-    merger_mp4 = '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/merger.mp4'
-    merger_sub = '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/merged_subtitle_00_00_00-00_01_30.srt'
-    merger_audio = '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/merger_audio.mp3'
-    bgm_path = '/Users/apple/Desktop/home/NarratoAI/resource/songs/bgm.mp3'
-    output_video = '/Users/apple/Desktop/home/NarratoAI/storage/tasks/qyn2-2-demo/combined_test.mp4'
-    
-    # 调用示例
-    options = {
-        'voice_volume': 1.0,            # 配音音量
-        'bgm_volume': 0.1,              # 背景音乐音量
-        'original_audio_volume': 1.0,   # 视频原声音量，0表示不保留
-        'keep_original_audio': True,    # 是否保留原声
-        'subtitle_enabled': True,       # 是否启用字幕 - 修复字幕开关bug
-        'subtitle_font': 'MicrosoftYaHeiNormal.ttc',  # 这里使用相对字体路径，会自动在 font_dir() 目录下查找
-        'subtitle_font_size': 40,
-        'subtitle_color': '#FFFFFF',
-        'subtitle_bg_color': None,      # 直接使用None表示透明背景
-        'subtitle_position': 'bottom',
-        'threads': 2
-    }
-    
-    try:
-        merge_materials(
-            video_path=merger_mp4,
-            audio_path=merger_audio,
-            subtitle_path=merger_sub,
-            bgm_path=bgm_path,
-            output_path=output_video,
-            options=options
-        )
-    except Exception as e:
-        logger.error(f"合并素材失败: \n{traceback.format_exc()}")
+    print("Use merge_materials() with workspace task outputs; legacy local-path demo data has been removed.")

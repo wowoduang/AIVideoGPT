@@ -54,7 +54,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONIOENCODING=utf-8 \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    APP_PORT=8866 \
+    NARRATO_WORKSPACE_ROOT=/NarratoAI-workspace
 
 # 一次性安装所有依赖、创建用户、配置系统，减少层级
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -67,24 +69,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dos2unix \
     && sed -i 's/<policy domain="path" rights="none" pattern="@\*"/<policy domain="path" rights="read|write" pattern="@\*"/' /etc/ImageMagick-6/policy.xml || true \
     && git lfs install \
-    && groupadd -r narratoai && useradd -r -g narratoai -d /NarratoAI -s /bin/bash narratoai \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制入口脚本并修复换行符问题
-COPY --chown=narratoai:narratoai docker-entrypoint.sh /usr/local/bin/
+COPY docker-entrypoint.sh /usr/local/bin/
 RUN dos2unix /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # 复制其余的应用代码
-COPY --chown=narratoai:narratoai . .
+COPY . .
 
 # 创建目录、复制配置、设置权限
-RUN mkdir -p storage/temp storage/tasks storage/json storage/narration_scripts storage/drama_analysis && \
+RUN mkdir -p \
+    /NarratoAI-workspace/temp \
+    /NarratoAI-workspace/cache \
+    /NarratoAI-workspace/runtime \
+    /NarratoAI-workspace/state \
+    /NarratoAI-workspace/tasks \
+    /NarratoAI-workspace/models \
+    /NarratoAI-workspace/videos \
+    /NarratoAI-workspace/subtitles \
+    /NarratoAI-workspace/scripts \
+    /NarratoAI-workspace/fonts \
+    /NarratoAI-workspace/songs \
+    /NarratoAI-workspace/analysis \
+    /NarratoAI-workspace/analysis/json \
+    /NarratoAI-workspace/analysis/narration_scripts \
+    /NarratoAI-workspace/analysis/drama_analysis && \
     if [ ! -f config.toml ]; then cp config.example.toml config.toml; fi && \
-    chown -R narratoai:narratoai /NarratoAI && \
-    chmod -R 755 /NarratoAI
-
-# 切换到非 root 用户
-USER narratoai
+    chmod -R 755 /NarratoAI /NarratoAI-workspace
 
 # 暴露端口
 EXPOSE 8866

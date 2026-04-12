@@ -17,6 +17,8 @@ logs/
 .pytest_cache/
 pytest-cache-files-*/
 pytest-of-*/
+MagicMock/
+AppData/
 
 
 node_modules
@@ -26,29 +28,17 @@ node_modules
 /sites/docs/.vuepress/.cache
 # VuePress 默认构建生成的静态文件目录
 /sites/docs/.vuepress/dist
-# 模型目录
-/models/
-./models/*
-resource/scripts/*.json
-resource/videos/*
-resource/songs/*.mp3
-resource/songs/*.flac
-resource/fonts/*.ttc
-resource/fonts/*.ttf
-resource/fonts/*.otf
-resource/srt/*.srt
-resource/srt/*_segments.json
-resource/srt/*_review_overrides.json
-resource/srt/*_clean_final_segments.json
-app/models/faster-whisper-large-v2/*
-app/models/faster-whisper-large-v3/*
-app/models/bert/*
-AppData/
+# Generated media, subtitles, scripts, caches, and local models should live in the external workspace.
+# Keep equivalent in-repo paths visible to git so accidental writes back into the repository are easy to catch.
 vendor/**/.git/
 vendor/**/.venv/
 vendor/**/.runtime_venv/
+vendor/**/.pytest_cache/
 vendor/**/__pycache__/
-vendor/VideoCaptioner/
+vendor/**/AppData/
+vendor/**/work-dir/
+vendor/**/ffcache*
+vendor/**/node_modules/
 
 bug清单.md
 task.md
@@ -59,4 +49,4 @@ task.md
 openspec/*
 AGENTS.md
 CLAUDE.md
-tests/*
+tests/__pycache__/

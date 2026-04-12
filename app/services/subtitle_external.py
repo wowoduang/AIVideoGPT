@@ -11,6 +11,7 @@ from typing import Dict, Optional
 from loguru import logger
 
 from app.config import config
+from app.utils import workspace
 
 try:
     import winreg  # type: ignore
@@ -31,6 +32,20 @@ _BACKEND_COMMAND_KEYS = {
     "videocaptioner_shell": ("videocaptioner_command", "NARRATO_VIDEOCAPTIONER_COMMAND"),
     "videolingo_shell": ("videolingo_command", "NARRATO_VIDEOLINGO_COMMAND"),
 }
+
+
+def _config_root_dir() -> str:
+    candidate = getattr(config, "root_dir", "")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _config_workspace_root() -> str:
+    app_cfg = getattr(config, "app", {})
+    if isinstance(app_cfg, dict):
+        return str(app_cfg.get("workspace_root", "") or "")
+    return ""
 
 
 def normalize_external_backend(backend: str) -> str:
@@ -76,12 +91,13 @@ def _build_context(video_file: str, audio_file: str, subtitle_file: str) -> Dict
 
 def _find_repo_candidate(name: str) -> str:
     key_base = str(name or "").strip().lower()
+    root_dir = _config_root_dir()
     raw_candidates = [
         str(config.whisper.get(f"{key_base}_repo_dir", "") or "").strip(),
         str(os.getenv(f"NARRATO_{key_base.upper()}_REPO_DIR") or "").strip(),
-        os.path.join(config.root_dir, "vendor", name),
-        os.path.join(os.path.dirname(config.root_dir), name),
-        os.path.join(os.path.dirname(config.root_dir), name.replace("Captioner", "captioner")),
+        workspace.vendor_dir(name, root_dir=root_dir),
+        os.path.join(os.path.dirname(root_dir), name),
+        os.path.join(os.path.dirname(root_dir), name.replace("Captioner", "captioner")),
     ]
     for candidate in raw_candidates:
         if candidate and os.path.isdir(candidate):
@@ -148,7 +164,13 @@ def _clear_proxy_env(env: Dict[str, str]) -> Dict[str, str]:
 
 def _videocaptioner_runtime_env(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     merged = _clear_proxy_env(_augment_env_with_windows_paths(env))
-    runtime_root = os.path.abspath(os.path.join(config.root_dir, "storage", "temp", "videocaptioner_runtime"))
+    root_dir = _config_root_dir()
+    runtime_root = workspace.third_party_runtime_dir(
+        "videocaptioner",
+        create=True,
+        root_dir=root_dir,
+        workspace_root=_config_workspace_root(),
+    )
     local_appdata = os.path.join(runtime_root, "LocalAppData")
     roaming_appdata = os.path.join(runtime_root, "AppData")
     os.makedirs(local_appdata, exist_ok=True)
@@ -163,10 +185,20 @@ def _videocaptioner_command_prefix() -> tuple[list[str], dict[str, str] | None, 
     if repo_dir:
         env = _videocaptioner_runtime_env()
         python_candidates = []
+        root_dir = _config_root_dir()
+        external_runtime_root = workspace.third_party_runtime_dir(
+            "videocaptioner",
+            root_dir=root_dir,
+            workspace_root=_config_workspace_root(),
+        )
         if os.name == "nt":
+            for venv_name in (".runtime_venv", ".venv"):
+                python_candidates.append(os.path.join(external_runtime_root, venv_name, "Scripts", "python.exe"))
             for venv_name in (".runtime_venv", ".venv"):
                 python_candidates.append(os.path.join(repo_dir, venv_name, "Scripts", "python.exe"))
         else:
+            for venv_name in (".runtime_venv", ".venv"):
+                python_candidates.append(os.path.join(external_runtime_root, venv_name, "bin", "python"))
             for venv_name in (".runtime_venv", ".venv"):
                 python_candidates.append(os.path.join(repo_dir, venv_name, "bin", "python"))
         pythonpath_parts = []

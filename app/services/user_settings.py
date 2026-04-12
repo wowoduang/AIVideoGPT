@@ -42,9 +42,7 @@ SESSION_KEY_MAP = {
 
 
 def _settings_root() -> str:
-    root = os.path.join(utils.storage_dir(), SETTINGS_DIR_NAME)
-    os.makedirs(root, exist_ok=True)
-    return root
+    return utils.state_dir(SETTINGS_DIR_NAME)
 
 
 def get_active_profile(session_state: Optional[dict] = None) -> str:

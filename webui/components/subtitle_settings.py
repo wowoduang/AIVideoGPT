@@ -2,8 +2,8 @@
 from loguru import logger
 import streamlit as st
 from app.config import config
+from app.utils import utils
 from webui.utils.cache import get_fonts_cache
-import os
 
 
 def render_subtitle_panel(tr):
@@ -47,8 +47,11 @@ def render_subtitle_panel(tr):
 def render_font_settings(tr):
     """渲染字体设置"""
     # 获取字体列表
-    font_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "resource", "fonts")
+    font_dir = utils.font_dir()
     font_names = get_fonts_cache(font_dir)
+    if not font_names:
+        logger.warning(f"No fonts found in workspace font directory: {font_dir}")
+        font_names = ["SimHei"]
 
     # 获取保存的字体设置
     saved_font_name = config.ui.get("font_name", "")

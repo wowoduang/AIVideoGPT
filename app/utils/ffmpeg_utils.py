@@ -9,6 +9,8 @@ import tempfile
 from typing import Dict, List, Optional, Tuple, Union
 from loguru import logger
 
+from app.utils import utils
+
 # 全局变量，存储检测到的硬件加速信息
 _FFMPEG_HW_ACCEL_INFO = {
     "available": False,
@@ -84,7 +86,11 @@ def create_test_video() -> str:
     """
     try:
         # 创建临时文件
-        temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix='.mp4',
+            delete=False,
+            dir=utils.temp_dir("ffmpeg_hwaccel"),
+        )
         temp_path = temp_file.name
         temp_file.close()
 

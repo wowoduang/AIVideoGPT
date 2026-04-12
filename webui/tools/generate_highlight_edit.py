@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import time
 import traceback
+from typing import Any, Dict
 
 import streamlit as st
 from loguru import logger
 
-from app.services.highlight_edit_pipeline import run_highlight_edit_pipeline
 from app.services.subtitle_text import decode_subtitle_bytes
 from app.services.upload_validation import InputValidationError, ensure_existing_file
+from webui.tools.generate_highlight_edit_api import generate_highlight_edit as generate_highlight_edit_v2
+from webui.utils import job_runner
 
 
 VALID_VIDEO_EXTS = (".mp4", ".mov", ".avi", ".flv", ".mkv")
 
 
-def _sync_highlight_subtitle_state(subtitle_result):
+def _sync_highlight_subtitle_state(subtitle_result: Dict[str, Any]) -> None:
     subtitle_path = str((subtitle_result or {}).get("subtitle_path") or "").strip()
     if not subtitle_path:
         return
@@ -23,12 +25,67 @@ def _sync_highlight_subtitle_state(subtitle_result):
     st.session_state["highlight_subtitle_path"] = subtitle_path
 
     try:
-        with open(subtitle_path, "rb") as f:
-            decoded = decode_subtitle_bytes(f.read())
+        with open(subtitle_path, "rb") as file_obj:
+            decoded = decode_subtitle_bytes(file_obj.read())
         st.session_state["subtitle_content"] = decoded.text
         st.session_state["highlight_subtitle_content"] = decoded.text
     except Exception as exc:
-        logger.warning("Failed to sync highlight subtitle content from {}: {}", subtitle_path, exc)
+        logger.warning("failed to sync highlight subtitle content from {}: {}", subtitle_path, exc)
+
+
+def _build_highlight_request(video_path: str) -> Dict[str, Any]:
+    return {
+        "video_path": video_path,
+        "mode": str(st.session_state.get("highlight_edit_mode", "highlight_recut") or "highlight_recut"),
+        "target_duration_seconds": int(st.session_state.get("highlight_target_minutes", 8) * 60),
+        "movie_title": str(st.session_state.get("highlight_movie_title", "") or ""),
+        "highlight_profile": str(st.session_state.get("highlight_movie_genre", "auto") or "auto"),
+        "subtitle_path": str(st.session_state.get("highlight_subtitle_path", "") or ""),
+        "narration_text": str(st.session_state.get("highlight_narration_text", "") or ""),
+        "narration_audio_path": "",
+        "prefer_raw_audio": bool(st.session_state.get("highlight_prefer_raw_audio", True)),
+        "visual_mode": str(st.session_state.get("highlight_visual_mode", "auto") or "auto"),
+        "regenerate_subtitle": st.session_state.get("highlight_subtitle_source_mode") == "auto_subtitle",
+        "subtitle_backend": str(st.session_state.get("subtitle_asr_backend", "faster-whisper") or "faster-whisper"),
+    }
+
+
+def _apply_highlight_pipeline_success(pipeline_result: Dict[str, Any]) -> None:
+    st.session_state["video_clip_json"] = pipeline_result.get("script_items", [])
+    st.session_state["video_clip_json_path"] = pipeline_result.get("script_path", "")
+    st.session_state["highlight_edit_composition_plan"] = pipeline_result.get("composition_plan", {})
+    st.session_state["highlight_edit_composition_plan_path"] = pipeline_result.get("composition_plan_path", "")
+    st.session_state["highlight_edit_candidate_clips"] = pipeline_result.get("candidate_clips", [])
+    st.session_state["highlight_edit_plot_candidate_clips"] = pipeline_result.get("plot_candidate_clips", [])
+    st.session_state["highlight_edit_scene_candidate_clips"] = pipeline_result.get("scene_candidate_clips", [])
+    st.session_state["highlight_edit_candidate_stats"] = pipeline_result.get("candidate_stats", {})
+    st.session_state["highlight_edit_selected_clips"] = pipeline_result.get("selected_clips", [])
+    st.session_state["highlight_edit_plot_chunks"] = pipeline_result.get("plot_chunks", [])
+    st.session_state["highlight_edit_narration_units"] = pipeline_result.get("narration_units", [])
+    st.session_state["highlight_edit_narration_matches"] = pipeline_result.get("narration_matches", [])
+    st.session_state["highlight_edit_profile"] = pipeline_result.get("highlight_profile", {})
+    st.session_state["highlight_edit_capabilities"] = pipeline_result.get("highlight_capabilities", {})
+    _sync_highlight_subtitle_state(pipeline_result.get("subtitle_result") or {})
+
+
+def _extract_job_result(task: Dict[str, Any]) -> Dict[str, Any]:
+    payload = task.get("payload")
+    if isinstance(payload, dict):
+        result = payload.get("result")
+        if isinstance(result, dict) and result:
+            return result
+
+    result = task.get("result")
+    if isinstance(result, dict) and result:
+        return result
+
+    if any(key in task for key in ("script_items", "composition_plan", "candidate_clips", "selected_clips")):
+        return dict(task)
+    return {}
+
+
+def _transport_label(transport: str) -> str:
+    return "Local API" if transport == job_runner.TRANSPORT_LOCAL_API else "In-Process"
 
 
 def generate_highlight_edit(tr, params):

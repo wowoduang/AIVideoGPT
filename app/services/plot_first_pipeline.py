@@ -245,7 +245,7 @@ def _run(
 
 def _build_output_paths(video_hash: str) -> Dict[str, str]:
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    analysis_dir = os.path.join(utils.storage_dir(), "temp", "analysis")
+    analysis_dir = utils.analysis_dir("json")
     frame_output_dir = os.path.join(utils.temp_dir("plot_frames"), video_hash)
     script_path = os.path.join(utils.script_dir(), f"{video_hash}_plot_first_{now}.json")
     analysis_path = os.path.join(analysis_dir, f"{video_hash}_plot_first_{now}.json")

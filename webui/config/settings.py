@@ -49,6 +49,48 @@ class WebUIConfig:
         self.azure = self.azure or {}
         self.root_dir = self.root_dir or os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
+
+def _normalize_path(path: str) -> str:
+    expanded = os.path.expandvars(os.path.expanduser(str(path or "").strip()))
+    return os.path.abspath(expanded) if expanded else ""
+
+
+def _default_workspace_root() -> str:
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    configured = (
+        str(os.getenv("NARRATO_WORKSPACE_ROOT") or "").strip()
+        or str(os.getenv("WORKSPACE_ROOT") or "").strip()
+    )
+    if configured:
+        resolved = _normalize_path(configured)
+        if not os.path.isabs(configured):
+            resolved = os.path.abspath(os.path.join(root_dir, configured))
+        return resolved
+
+    project_parent = os.path.dirname(root_dir)
+    project_name = os.path.basename(root_dir.rstrip("\\/")) or "AIVideoGPT"
+    return os.path.join(project_parent, f"{project_name}-workspace")
+
+
+def _legacy_webui_config_file() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        ".streamlit",
+        "webui.toml"
+    )
+
+
+def resolve_config_path(config_path: Optional[str] = None) -> str:
+    raw_path = str(config_path or os.getenv("NARRATO_WEBUI_CONFIG_FILE", "") or "").strip()
+    if raw_path:
+        resolved = _normalize_path(raw_path)
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        if not os.path.isabs(raw_path):
+            resolved = os.path.abspath(os.path.join(root_dir, raw_path))
+        return resolved
+    return os.path.join(_default_workspace_root(), "state", "webui.toml")
+
+
 def load_config(config_path: Optional[str] = None) -> WebUIConfig:
     """加载配置文件
     Args:
@@ -57,14 +99,14 @@ def load_config(config_path: Optional[str] = None) -> WebUIConfig:
         WebUIConfig: 配置对象
     """
     try:
-        if config_path is None:
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                ".streamlit",
-                "webui.toml"
-            )
+        config_path = resolve_config_path(config_path)
         
         # 如果配置文件不存在，使用示例配置
+        if not os.path.exists(config_path):
+            legacy_config = _legacy_webui_config_file()
+            if legacy_config != config_path and os.path.exists(legacy_config):
+                config_path = legacy_config
+
         if not os.path.exists(config_path):
             example_config = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -104,31 +146,25 @@ def save_config(config: WebUIConfig, config_path: Optional[str] = None) -> bool:
         bool: 是否保存成功
     """
     try:
-        if config_path is None:
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                ".streamlit",
-                "webui.toml"
-            )
-        
-        # 确保目录存在
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        
-        # 转换为字典，不再保存版本号到配置文件
+        config_path = resolve_config_path(config_path)
+
         config_dict = {
             "ui": config.ui,
             "proxy": config.proxy,
             "app": config.app,
             "azure": config.azure
-            # 不再保存project_version到配置文件
         }
-        
-        # 保存配置
-        with open(config_path, "w", encoding="utf-8") as f:
-            import tomli_w
-            tomli_w.dump(config_dict, f)
-        
-        return True
+
+        for target_path in (config_path, _legacy_webui_config_file()):
+            try:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with open(target_path, "w", encoding="utf-8") as f:
+                    import tomli_w
+                    tomli_w.dump(config_dict, f)
+                return True
+            except OSError as err:
+                logger.warning(f"保存 WebUI 配置失败: {target_path}, 尝试兼容回落: {err}")
+        return False
     
     except Exception as e:
         logger.error(f"保存配置文件失败: {e}")

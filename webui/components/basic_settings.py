@@ -15,6 +15,8 @@ OPENAI_COMPATIBLE_GATEWAY_BASE_URLS = {
     "moonshot": "https://api.moonshot.cn/v1",
     "gemini(openai)": "",
     "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
+    "doubao": "https://ark.cn-beijing.volces.com/api/v3",
 }
 
 
@@ -22,6 +24,7 @@ def normalize_litellm_model_name(selected_provider: str, model_name: str, base_u
     """Normalize provider/model for providers that need LiteLLM aliases.
 
     qwen provider in the UI maps to dashscope for Aliyun Bailian / DashScope.
+    doubao provider in the UI maps to volcengine for LiteLLM / Ark.
     Existing working huggingface-based workarounds remain untouched.
     """
     provider = (selected_provider or "").strip().lower()
@@ -30,6 +33,8 @@ def normalize_litellm_model_name(selected_provider: str, model_name: str, base_u
         return ""
     if provider == "qwen":
         return f"dashscope/{model}"
+    if provider == "doubao":
+        return f"volcengine/{model}"
     return f"{provider}/{model}"
 
 
@@ -362,6 +367,8 @@ def test_litellm_vision_model(api_key: str, base_url: str, model_name: str, tr) 
             "qwen": "QWEN_API_KEY",
             "dashscope": "DASHSCOPE_API_KEY",
             "siliconflow": "SILICONFLOW_API_KEY",
+            "volcengine": "ARK_API_KEY",
+            "doubao": "ARK_API_KEY",
         }
         env_var = env_key_mapping.get(provider.lower(), f"{provider.upper()}_API_KEY")
         old_key = os.environ.get(env_var)
@@ -411,7 +418,8 @@ def test_litellm_vision_model(api_key: str, base_url: str, model_name: str, tr) 
                 "model": test_model_name,
                 "messages": messages,
                 "temperature": 0.1,
-                "max_tokens": 50
+                "max_tokens": 50,
+                "api_key": api_key,
             }
             
             if base_url:
@@ -483,6 +491,8 @@ def test_litellm_text_model(api_key: str, base_url: str, model_name: str, tr) ->
             "siliconflow": "SILICONFLOW_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
             "moonshot": "MOONSHOT_API_KEY",
+            "volcengine": "ARK_API_KEY",
+            "doubao": "ARK_API_KEY",
         }
         env_var = env_key_mapping.get(provider.lower(), f"{provider.upper()}_API_KEY")
         old_key = os.environ.get(env_var)
@@ -516,7 +526,8 @@ def test_litellm_text_model(api_key: str, base_url: str, model_name: str, tr) ->
                 "model": test_model_name,
                 "messages": messages,
                 "temperature": 0.1,
-                "max_tokens": 20
+                "max_tokens": 20,
+                "api_key": api_key,
             }
             
             if base_url:
@@ -584,7 +595,7 @@ def render_vision_llm_settings(tr):
     LITELLM_PROVIDERS = [
         "openai", "gemini", "deepseek", "qwen", "dashscope", "siliconflow", "moonshot", 
         "anthropic", "azure", "ollama", "vertex_ai", "mistral", "codestral", 
-        "volcengine", "groq", "cohere", "together_ai", "fireworks_ai", 
+        "doubao", "volcengine", "groq", "cohere", "together_ai", "fireworks_ai", 
         "openrouter", "replicate", "huggingface", "xai", "deepgram", "vllm", 
         "bedrock", "cloudflare"
     ]
@@ -612,6 +623,7 @@ def render_vision_llm_settings(tr):
                  "• gemini-2.0-flash-lite\n"
                  "• gpt-4o\n"
                  "• qwen3.5-plus （通义建议走 qwen/dashscope）\n"
+                 "• ep-xxxxxxxxxxxx （豆包/方舟建议填你的接入点 ID）\n"
                  "• Qwen/Qwen2.5-VL-32B-Instruct (SiliconFlow)\n\n"
                  "支持 100+ providers，详见: https://docs.litellm.ai/docs/providers",
             key="vision_model_input"
@@ -626,7 +638,8 @@ def render_vision_llm_settings(tr):
              "• Gemini: https://makersuite.google.com/app/apikey\n"
              "• OpenAI: https://platform.openai.com/api-keys\n"
              "• Qwen: https://bailian.console.aliyun.com/\n"
-             "• SiliconFlow: https://cloud.siliconflow.cn/account/ak"
+             "• SiliconFlow: https://cloud.siliconflow.cn/account/ak\n"
+             "• 豆包 / 方舟: https://console.volcengine.com/ark"
     )
 
     vision_base_help, vision_base_required, vision_placeholder = build_base_url_help(
@@ -866,7 +879,7 @@ def render_text_llm_settings(tr):
     LITELLM_PROVIDERS = [
         "openai", "gemini", "deepseek", "qwen", "dashscope", "siliconflow", "moonshot", 
         "anthropic", "azure", "ollama", "vertex_ai", "mistral", "codestral", 
-        "volcengine", "groq", "cohere", "together_ai", "fireworks_ai", 
+        "doubao", "volcengine", "groq", "cohere", "together_ai", "fireworks_ai", 
         "openrouter", "replicate", "huggingface", "xai", "deepgram", "vllm", 
         "bedrock", "cloudflare"
     ]
@@ -895,6 +908,7 @@ def render_text_llm_settings(tr):
                  "• gpt-4o\n"
                  "• gemini-2.0-flash\n"
                  "• qwen-plus （通义建议走 qwen/dashscope）\n"
+                 "• ep-xxxxxxxxxxxx （豆包/方舟建议填你的接入点 ID）\n"
                  "• deepseek-ai/DeepSeek-R1 (SiliconFlow)\n\n"
                  "支持 100+ providers，详见: https://docs.litellm.ai/docs/providers",
             key="text_model_input"
@@ -911,7 +925,8 @@ def render_text_llm_settings(tr):
              "• OpenAI: https://platform.openai.com/api-keys\n"
              "• Qwen: https://bailian.console.aliyun.com/\n"
              "• SiliconFlow: https://cloud.siliconflow.cn/account/ak\n"
-             "• Moonshot: https://platform.moonshot.cn/console/api-keys"
+             "• Moonshot: https://platform.moonshot.cn/console/api-keys\n"
+             "• 豆包 / 方舟: https://console.volcengine.com/ark"
     )
 
     text_base_help, text_base_required, text_placeholder = build_base_url_help(

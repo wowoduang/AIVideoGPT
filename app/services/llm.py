@@ -205,24 +205,24 @@ def _generate_response(prompt: str, llm_provider: str = None) -> str:
             model_name = "***"
             if not secret_key:
                 raise ValueError(
-                    f"{llm_provider}: secret_key is not set, please set it in the config.toml file."
+                    f"{llm_provider}: secret_key is not set, please set it in the config file: {config.config_file}"
                 )
         else:
             raise ValueError(
-                "llm_provider is not set, please set it in the config.toml file."
+                f"llm_provider is not set, please set it in the config file: {config.config_file}"
             )
 
         if not api_key:
             raise ValueError(
-                f"{llm_provider}: api_key is not set, please set it in the config.toml file."
+                f"{llm_provider}: api_key is not set, please set it in the config file: {config.config_file}"
             )
         if not model_name:
             raise ValueError(
-                f"{llm_provider}: model_name is not set, please set it in the config.toml file."
+                f"{llm_provider}: model_name is not set, please set it in the config file: {config.config_file}"
             )
         if not base_url:
             raise ValueError(
-                f"{llm_provider}: base_url is not set, please set it in the config.toml file."
+                f"{llm_provider}: base_url is not set, please set it in the config file: {config.config_file}"
             )
 
         if llm_provider == "qwen":
@@ -364,7 +364,7 @@ def _generate_response_video(prompt: str, llm_provider_video: str, video_file: U
         base_url = "***"
     else:
         raise ValueError(
-            "llm_provider 未设置，请在 config.toml 文件中进行设置。"
+            f"llm_provider 未设置，请在配置文件中进行设置：{config.config_file}"
         )
 
     if llm_provider_video == "gemini":
@@ -806,8 +806,7 @@ if __name__ == "__main__":
     )
 
     # # 2. 解说文案
-    # video_path = "/Users/apple/Desktop/home/NarratoAI/resource/videos/1.mp4"
-    # # video_path = "E:\\projects\\NarratoAI\\resource\\videos\\1.mp4"
+    # video_path = "<workspace videos>/1.mp4"
     # video_plot = """
     #     李自忠拿着儿子李牧名下的存折，去银行取钱给儿子救命，却被要求证明"你儿子是你儿子"。
     # 走投无路时碰到银行被抢劫，劫匪给了他两沓钱救命，李自忠却因此被银行以抢劫罪起诉，并顶格判处20年有期徒刑。

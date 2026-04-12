@@ -148,7 +148,7 @@ def search_videos_pixabay(
 
 def save_video(video_url: str, save_dir: str = "") -> str:
     if not save_dir:
-        save_dir = utils.storage_dir("cache_videos")
+        save_dir = utils.cache_dir("materials")
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)

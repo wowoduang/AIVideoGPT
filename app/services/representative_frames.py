@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Dict, List, Optional
 
 from loguru import logger
 from app.services.video_working_copy import ensure_working_video_copy
+from app.utils import utils
 
 try:
     import cv2
@@ -39,7 +39,7 @@ def extract_representative_frames_for_scenes(
     if not scenes:
         return []
     if not output_dir:
-        output_dir = os.path.join(tempfile.gettempdir(), "videaai_story_frames")
+        output_dir = utils.temp_dir("representative_frames")
     os.makedirs(output_dir, exist_ok=True)
 
     processing_video_path = ensure_working_video_copy(video_path, purpose="representative_frames")

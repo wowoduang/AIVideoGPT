@@ -8,14 +8,17 @@ services:
     ports:
       - "8866:8866"
     volumes:
-      - ./storage:/NarratoAI/storage
+      - type: bind
+        source: ${WORKSPACE_ROOT:-../AIVideoGPT-workspace}
+        target: /NarratoAI-workspace
       - ./config.toml:/NarratoAI/config.toml
-      - ./resource:/NarratoAI/resource:rw
-      - ./app/models:/NarratoAI/app/models:rw
+      - ./resource:/NarratoAI/resource:ro
       
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Shanghai
+      - APP_PORT=8866
+      - NARRATO_WORKSPACE_ROOT=/NarratoAI-workspace
     restart: unless-stopped
 
     # 健康检查

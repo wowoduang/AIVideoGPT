@@ -3,17 +3,35 @@ set -e
 
 cd /NarratoAI || exit 1
 
+WORKSPACE_ROOT="${NARRATO_WORKSPACE_ROOT:-/NarratoAI-workspace}"
+APP_PORT="${APP_PORT:-8866}"
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+workspace_path() {
+  local sub_dir="$1"
+  if [ -n "$sub_dir" ]; then
+    printf '%s/%s' "$WORKSPACE_ROOT" "$sub_dir"
+  else
+    printf '%s' "$WORKSPACE_ROOT"
+  fi
+}
+
 install_runtime_dependencies() {
+  if [ "${NARRATOAI_INSTALL_AT_STARTUP:-0}" != "1" ]; then
+    log "跳过容器启动时依赖安装（镜像已内置依赖，可设置 NARRATOAI_INSTALL_AT_STARTUP=1 强制开启）"
+    return 0
+  fi
+
   log "检查并安装运行时依赖..."
 
   local requirements_file="requirements.txt"
-  local installed_packages_file="storage/temp/.requirements_installed"
+  local installed_packages_file
+  installed_packages_file="$(workspace_path 'runtime/.requirements_installed')"
 
-  mkdir -p storage/temp
+  mkdir -p "$(workspace_path 'runtime')"
 
   if [ -f "$requirements_file" ]; then
     if [ ! -f "$installed_packages_file" ] || [ "$requirements_file" -nt "$installed_packages_file" ]; then
@@ -59,6 +77,7 @@ install_runtime_dependencies() {
 
 check_requirements() {
   log "检查应用环境..."
+  log "工作区根目录: ${WORKSPACE_ROOT}"
 
   if [ ! -f "config.toml" ]; then
     if [ -f "config.example.toml" ]; then
@@ -69,10 +88,27 @@ check_requirements() {
     fi
   fi
 
-  for dir in "storage/temp" "storage/tasks" "storage/json" "storage/narration_scripts" "storage/drama_analysis"; do
-    if [ ! -d "$dir" ]; then
-      log "创建目录: $dir"
-      mkdir -p "$dir"
+  for dir in \
+    "temp" \
+    "cache" \
+    "runtime" \
+    "state" \
+    "tasks" \
+    "models" \
+    "videos" \
+    "subtitles" \
+    "scripts" \
+    "fonts" \
+    "songs" \
+    "analysis" \
+    "analysis/json" \
+    "analysis/narration_scripts" \
+    "analysis/drama_analysis"; do
+    local target_dir
+    target_dir="$(workspace_path "$dir")"
+    if [ ! -d "$target_dir" ]; then
+      log "创建目录: $target_dir"
+      mkdir -p "$target_dir"
     fi
   done
 
@@ -84,14 +120,14 @@ start_webui() {
   log "启动 NarratoAI WebUI..."
 
   if command -v netstat >/dev/null 2>&1; then
-    if netstat -tuln | grep -q ":8866 "; then
-      log "警告: 端口 8866 已被占用"
+    if netstat -tuln | grep -q ":${APP_PORT} "; then
+      log "警告: 端口 ${APP_PORT} 已被占用"
     fi
   fi
 
   exec streamlit run webui.py \
     --server.address=0.0.0.0 \
-    --server.port=8866 \
+    --server.port="${APP_PORT}" \
     --server.fileWatcherType=none \
     --server.runOnSave=false \
     --server.enableCORS=true \
@@ -117,7 +153,7 @@ case "$1" in
     ;;
   "health")
     log "执行健康检查..."
-    if curl -f http://localhost:8866/_stcore/health >/dev/null 2>&1; then
+    if curl -f "http://localhost:${APP_PORT}/_stcore/health" >/dev/null 2>&1; then
       log "健康检查通过"
       exit 0
     else

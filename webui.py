@@ -9,11 +9,11 @@ from app.config import config
 from app.services import user_settings
 from webui.components import basic_settings, video_settings, audio_settings, subtitle_settings, script_settings, \
     system_settings
+from webui.services.video_actions import build_video_clip_params, run_video_generation
 # from webui.utils import cache, file_utils
 from app.utils import utils
 from app.utils import ffmpeg_utils
 from app.utils.streamlit_compat import patch_streamlit_torch_watcher
-from app.models.schema import VideoClipParams, VideoAspect
 
 patch_streamlit_torch_watcher()
 
@@ -135,16 +135,32 @@ def tr(key):
     return loc.get("Translation", {}).get(key, key)
 
 
+def _build_video_clip_params():
+    script_params = script_settings.get_script_params()
+    video_params = video_settings.get_video_params()
+    audio_params = audio_settings.get_audio_params()
+    subtitle_params = subtitle_settings.get_subtitle_params()
+    return build_video_clip_params(
+        script_params=script_params,
+        video_params=video_params,
+        audio_params=audio_params,
+        subtitle_params=subtitle_params,
+    )
+
+
+def _render_generated_videos(video_files):
+    try:
+        if video_files:
+            player_cols = st.columns(len(video_files) * 2 + 1)
+            for i, url in enumerate(video_files):
+                player_cols[i * 2 + 1].video(url)
+    except Exception as e:
+        logger.error(f"播放视频失败: {e}")
+
+
 def render_generate_button():
     """渲染生成按钮和处理逻辑"""
     if st.button(tr("Generate Video"), use_container_width=True, type="primary"):
-        from app.services import task as tm
-        from app.services import state as sm
-        from app.models import const
-        import threading
-        import time
-        import uuid
-
         user_settings.save_runtime_settings(st.session_state)
 
         # 移除task_id检查 - 现在使用统一裁剪策略，不再需要预裁剪
@@ -156,77 +172,15 @@ def render_generate_button():
             st.error(tr("视频文件不能为空"))
             return
 
-        # 获取所有参数
-        script_params = script_settings.get_script_params()
-        video_params = video_settings.get_video_params()
-        audio_params = audio_settings.get_audio_params()
-        subtitle_params = subtitle_settings.get_subtitle_params()
+        try:
+            params = _build_video_clip_params()
+        except Exception as e:
+            logger.error(f"构建视频参数失败: {e}")
+            st.error(f"任务启动失败: {str(e)}")
+            return
 
-        # 合并所有参数
-        all_params = {
-            **script_params,
-            **video_params,
-            **audio_params,
-            **subtitle_params
-        }
-
-        # 创建参数对象
-        params = VideoClipParams(**all_params)
-
-        # 生成一个新的task_id用于本次处理
-        task_id = str(uuid.uuid4())
-
-        # 创建进度条
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        def run_task():
-            try:
-                tm.start_subclip_unified(
-                    task_id=task_id,
-                    params=params
-                )
-            except Exception as e:
-                logger.error(f"任务执行失败: {e}")
-                sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, message=str(e))
-
-        # 在新线程中启动任务
-        thread = threading.Thread(target=run_task)
-        thread.start()
-
-        # 轮询任务状态
-        while True:
-            task = sm.state.get_task(task_id)
-            if task:
-                progress = task.get("progress", 0)
-                state = task.get("state")
-                
-                # 更新进度条
-                progress_bar.progress(progress / 100)
-                status_text.text(f"Processing... {progress}%")
-
-                if state == const.TASK_STATE_COMPLETE:
-                    status_text.text(tr("视频生成完成"))
-                    progress_bar.progress(1.0)
-                    
-                    # 显示结果
-                    video_files = task.get("videos", [])
-                    try:
-                        if video_files:
-                            player_cols = st.columns(len(video_files) * 2 + 1)
-                            for i, url in enumerate(video_files):
-                                player_cols[i * 2 + 1].video(url)
-                    except Exception as e:
-                        logger.error(f"播放视频失败: {e}")
-                    
-                    st.success(tr("视频生成完成"))
-                    break
-                
-                elif state == const.TASK_STATE_FAILED:
-                    st.error(f"任务失败: {task.get('message', 'Unknown error')}")
-                    break
-            
-            time.sleep(0.5)
+        run_video_generation(tr, params, render_generated_videos=_render_generated_videos)
+        return
 
 
 

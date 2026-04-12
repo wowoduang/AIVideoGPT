@@ -6,6 +6,7 @@ from app.services import voice
 from app.models.schema import AudioVolumeDefaults
 from app.utils import utils
 from webui.utils.cache import get_songs_cache
+from webui.utils import file_utils
 
 
 def get_soulvoice_voices():
@@ -598,13 +599,18 @@ def render_indextts2_tts_settings(tr):
     
     if uploaded_file is not None:
         # 保存上传的文件
-        import tempfile
-        temp_dir = tempfile.gettempdir()
-        audio_path = os.path.join(temp_dir, f"indextts2_ref_{uploaded_file.name}")
-        with open(audio_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        reference_audio = audio_path
-        st.success(f"✅ 音频已上传: {audio_path}")
+        audio_path = file_utils.save_uploaded_file(
+            uploaded_file,
+            utils.temp_dir("reference_audio"),
+            allowed_types=[".wav", ".mp3"],
+            default_stem="indextts2_ref",
+            default_ext=".wav",
+        )
+        if audio_path:
+            reference_audio = audio_path
+            st.success(f"✅ 音频已上传: {audio_path}")
+        else:
+            st.error("上传参考音频失败")
     
     # 推理模式
     infer_mode = st.selectbox(
@@ -752,7 +758,7 @@ def render_voice_preview_new(tr, selected_engine):
             return
 
         with st.spinner("正在合成语音..."):
-            temp_dir = utils.storage_dir("temp", create=True)
+            temp_dir = utils.temp_dir("voice_preview")
             audio_file = os.path.join(temp_dir, f"tmp-voice-{str(uuid4())}.mp3")
 
             sub_maker = voice.tts(
@@ -860,7 +866,7 @@ def render_voice_preview(tr, voice_name):
             play_content = tr("Voice Example")
 
         with st.spinner(tr("Synthesizing Voice")):
-            temp_dir = utils.storage_dir("temp", create=True)
+            temp_dir = utils.temp_dir("voice_preview")
             audio_file = os.path.join(temp_dir, f"tmp-voice-{str(uuid4())}.mp3")
 
             sub_maker = voice.tts(

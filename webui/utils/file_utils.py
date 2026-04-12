@@ -1,11 +1,13 @@
 import os
 import glob
+import json
 import time
 import platform
 import shutil
 from uuid import uuid4
 from loguru import logger
 from app.utils import utils
+from app.utils import workspace
 
 def open_task_folder(root_dir, task_id):
     """打开任务文件夹
@@ -15,14 +17,14 @@ def open_task_folder(root_dir, task_id):
     """
     try:
         sys = platform.system()
-        path = os.path.join(root_dir, "storage", "tasks", task_id)
+        path = workspace.task_dir(sub_dir=task_id, create=False, root_dir=root_dir)
         if os.path.exists(path):
             if sys == 'Windows':
-                os.system(f"start {path}")
+                os.system(f'start "" "{path}"')
             if sys == 'Darwin':
-                os.system(f"open {path}")
+                os.system(f'open "{path}"')
             if sys == 'Linux':
-                os.system(f"xdg-open {path}")
+                os.system(f'xdg-open "{path}"')
     except Exception as e:
         logger.error(f"打开任务文件夹失败: {e}")
 
@@ -86,7 +88,34 @@ def get_file_list(directory, file_types=None, sort_by='ctime', reverse=True):
     
     return file_list
 
-def save_uploaded_file(uploaded_file, save_dir, allowed_types=None):
+
+def sanitize_filename(filename, default_stem: str = "upload", default_ext: str = ""):
+    """生成安全文件名，避免路径穿越和空文件名。"""
+    safe_name = os.path.basename(str(filename or "").strip())
+    if safe_name:
+        return safe_name
+
+    ext = default_ext or ""
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    return f"{default_stem}_{uuid4().hex}{ext}"
+
+
+def build_unique_file_path(save_dir: str, filename: str, default_stem: str = "upload", default_ext: str = "") -> str:
+    """在目标目录内生成安全且不冲突的文件路径。"""
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+
+    safe_name = sanitize_filename(filename, default_stem=default_stem, default_ext=default_ext)
+    save_path = os.path.join(save_dir, safe_name)
+    if os.path.exists(save_path):
+        file_name, file_extension = os.path.splitext(safe_name)
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        save_path = os.path.join(save_dir, f"{file_name}_{timestamp}{file_extension}")
+    return save_path
+
+
+def save_uploaded_file(uploaded_file, save_dir, allowed_types=None, chunk_size: int = 16 * 1024 * 1024, default_stem: str = "upload", default_ext: str = ""):
     """保存上传的文件
     Args:
         uploaded_file: StreamlitUploadedFile对象
@@ -96,32 +125,75 @@ def save_uploaded_file(uploaded_file, save_dir, allowed_types=None):
         str: 保存后的文件路径，失败返回None
     """
     try:
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        
-        file_name, file_extension = os.path.splitext(uploaded_file.name)
-        
+        safe_name = sanitize_filename(uploaded_file.name, default_stem=default_stem, default_ext=default_ext)
+        file_name, file_extension = os.path.splitext(safe_name)
+
         # 检查文件类型
         if allowed_types and file_extension.lower() not in allowed_types:
             logger.error(f"不支持的文件类型: {file_extension}")
             return None
-        
-        # 如果文件已存在，添加时间戳
-        save_path = os.path.join(save_dir, uploaded_file.name)
-        if os.path.exists(save_path):
-            timestamp = time.strftime("%Y%m%d%H%M%S")
-            new_file_name = f"{file_name}_{timestamp}{file_extension}"
-            save_path = os.path.join(save_dir, new_file_name)
-        
-        # 保存文件
+
+        save_path = build_unique_file_path(
+            save_dir,
+            safe_name,
+            default_stem=default_stem,
+            default_ext=default_ext,
+        )
+
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+
         with open(save_path, "wb") as f:
-            f.write(uploaded_file.read())
-        
+            while True:
+                chunk = uploaded_file.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+
         logger.info(f"文件保存成功: {save_path}")
         return save_path
     
     except Exception as e:
         logger.error(f"保存上传文件失败: {e}")
+        return None
+
+
+def save_text_file(content: str, save_dir: str, filename: str, encoding: str = "utf-8", default_stem: str = "text", default_ext: str = ""):
+    """以文本形式落盘，并自动处理安全文件名和重名冲突。"""
+    try:
+        save_path = build_unique_file_path(
+            save_dir,
+            filename,
+            default_stem=default_stem,
+            default_ext=default_ext,
+        )
+        with open(save_path, "w", encoding=encoding) as f:
+            f.write(content)
+        logger.info(f"文本文件保存成功: {save_path}")
+        return save_path
+    except Exception as e:
+        logger.error(f"保存文本文件失败: {e}")
+        return None
+
+
+def save_json_file(data, save_dir: str, filename: str, ensure_ascii: bool = False, indent: int = 2, default_stem: str = "data", default_ext: str = ".json"):
+    """以 JSON 形式落盘，并自动处理安全文件名和重名冲突。"""
+    try:
+        save_path = build_unique_file_path(
+            save_dir,
+            filename,
+            default_stem=default_stem,
+            default_ext=default_ext,
+        )
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
+        logger.info(f"JSON 文件保存成功: {save_path}")
+        return save_path
+    except Exception as e:
+        logger.error(f"保存 JSON 文件失败: {e}")
         return None
 
 def create_temp_file(prefix='tmp', suffix='', directory=None):
@@ -135,10 +207,10 @@ def create_temp_file(prefix='tmp', suffix='', directory=None):
     """
     try:
         if directory is None:
-            directory = utils.storage_dir("temp", create=True)
+            directory = utils.temp_dir("webui_files")
         
         if not os.path.exists(directory):
-            os.makedirs(directory)
+            os.makedirs(directory, exist_ok=True)
         
         temp_file = os.path.join(directory, f"{prefix}-{str(uuid4())}{suffix}")
         return temp_file
@@ -182,7 +254,7 @@ def ensure_directory(directory):
     """
     try:
         if not os.path.exists(directory):
-            os.makedirs(directory)
+            os.makedirs(directory, exist_ok=True)
         return True
     except Exception as e:
         logger.error(f"创建目录失败: {directory}, 错误: {e}")

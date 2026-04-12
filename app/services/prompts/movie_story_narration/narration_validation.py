@@ -40,6 +40,7 @@ class NarrationValidationPrompt(ParameterizedPrompt):
 6. 如果 `is_opening_segment=true`，这段解说是否完全没有开场交代
 7. 是否适合作为最终口播
 8. 轻微概括、措辞不够严谨但主线没错时，优先给 review，不要轻易给 reject
+9. 如果证据里提供了 `timestamp`、`start/end`、`visual_summary`、`representative_frames`，要把它们当作当前片段的时间窗和画面证据，避免写出错位画面
 
 # 输出 JSON 结构
 {

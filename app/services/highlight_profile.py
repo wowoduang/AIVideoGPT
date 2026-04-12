@@ -317,6 +317,12 @@ def summarize_highlight_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
         "source": str(current.get("source", "") or ""),
         "confidence": round(float(current.get("confidence", 0.0) or 0.0), 3),
         "reasons": list(current.get("reasons") or [])[:6],
+        "signal_route": str(current.get("signal_route", "") or ""),
+        "signal_modifiers": list(current.get("signal_modifiers") or [])[:6],
+        "signal_reasons": list(current.get("signal_reasons") or [])[:6],
+        "signal_metrics": {
+            key: _clamp_unit(value) for key, value in dict(current.get("signal_metrics") or {}).items()
+        },
     }
 
 
@@ -415,6 +421,223 @@ def _ratio(items: Sequence[Dict[str, Any]], predicate) -> float:
     return float(mean(values)) if values else 0.0
 
 
+def _clamp_unit(value: float) -> float:
+    return round(max(min(float(value or 0.0), 1.0), 0.0), 3)
+
+
+def _normalize_weight_map(weights: Dict[str, Any]) -> Dict[str, float]:
+    normalized: Dict[str, float] = {}
+    for key, value in (weights or {}).items():
+        try:
+            normalized[str(key)] = max(float(value or 0.0), 0.0)
+        except Exception:
+            normalized[str(key)] = 0.0
+    total = sum(normalized.values())
+    if total <= 0.0001:
+        return {key: 0.0 for key in normalized}
+    return {key: round(value / total, 3) for key, value in normalized.items()}
+
+
+def _signal_metrics(
+    *,
+    subtitle_segments: Sequence[Dict[str, Any]],
+    plot_chunks: Sequence[Dict[str, Any]],
+    candidate_clips: Sequence[Dict[str, Any]],
+) -> Dict[str, float]:
+    subtitle_items = list(subtitle_segments or [])
+    plot_items = list(plot_chunks or [])
+    clip_items = list(candidate_clips or [])
+    subtitle_texts = [str(item.get("text", "") or "").strip() for item in subtitle_items]
+    non_empty_subtitles = [text for text in subtitle_texts if text]
+    subtitle_coverage = len(non_empty_subtitles) / max(len(subtitle_items), 1) if subtitle_items else 0.0
+    avg_subtitle_length = mean((len(text) for text in non_empty_subtitles)) if non_empty_subtitles else 0.0
+    subtitle_quality = _clamp_unit(subtitle_coverage * 0.65 + min(avg_subtitle_length / 26.0, 1.0) * 0.35)
+
+    multi_speaker_ratio = _ratio(
+        clip_items,
+        lambda clip: int(clip.get("speaker_turns", 0) or 0) >= 2 or len(list(clip.get("speaker_names") or [])) >= 2,
+    )
+    single_focus_ratio = _ratio(clip_items, lambda clip: str(clip.get("shot_role", "") or "") == "single_focus")
+    ensemble_ratio = _ratio(
+        clip_items,
+        lambda clip: str(clip.get("shot_role", "") or "") in {"dialogue_exchange", "ensemble_relation"},
+    )
+    audio_peak_ratio = _ratio(
+        clip_items,
+        lambda clip: float(clip.get("audio_signal_score", 0.0) or 0.0) >= 0.56
+        or float(clip.get("audio_peak_score", 0.0) or 0.0) >= 0.72,
+    )
+    plot_summary_ratio = _ratio(
+        plot_items,
+        lambda chunk: bool(
+            str(chunk.get("real_narrative_state", "") or "").strip()
+            or str(chunk.get("surface_dialogue_meaning", "") or "").strip()
+        ),
+    )
+
+    evidence = _evidence_scores(clip_items)
+    speech_density = _clamp_unit(
+        evidence["dialogue_exchange"] * 0.44
+        + evidence["relation"] * 0.14
+        + subtitle_quality * 0.22
+        + multi_speaker_ratio * 0.2
+    )
+    kinetic_signal = _clamp_unit(
+        evidence["visible_action"] * 0.34
+        + evidence["energy"] * 0.24
+        + evidence["raw_audio_ratio"] * 0.18
+        + audio_peak_ratio * 0.16
+        + evidence["conflict_ratio"] * 0.08
+    )
+    ensemble_signal = _clamp_unit(
+        evidence["group_reaction"] * 0.32
+        + evidence["dialogue_exchange"] * 0.2
+        + evidence["relation"] * 0.12
+        + ensemble_ratio * 0.2
+        + multi_speaker_ratio * 0.16
+    )
+    inner_state_signal = _clamp_unit(
+        evidence["inner_state"] * 0.44
+        + evidence["reaction"] * 0.24
+        + single_focus_ratio * 0.2
+        + evidence["emotion"] * 0.12
+    )
+    text_reliability = _clamp_unit(subtitle_quality * 0.72 + plot_summary_ratio * 0.28)
+
+    return {
+        "subtitle_quality": subtitle_quality,
+        "speech_density": speech_density,
+        "kinetic_signal": kinetic_signal,
+        "ensemble_signal": ensemble_signal,
+        "inner_state_signal": inner_state_signal,
+        "text_reliability": text_reliability,
+        "multi_speaker_ratio": _clamp_unit(multi_speaker_ratio),
+        "single_focus_ratio": _clamp_unit(single_focus_ratio),
+        "audio_peak_ratio": _clamp_unit(audio_peak_ratio),
+        "plot_summary_ratio": _clamp_unit(plot_summary_ratio),
+    }
+
+
+def _route_signal_profile(signal_metrics: Dict[str, float]) -> Tuple[str, List[str], List[str]]:
+    metrics = dict(signal_metrics or {})
+    modifiers: List[str] = []
+    reasons: List[str] = []
+    subtitle_quality = float(metrics.get("subtitle_quality", 0.0) or 0.0)
+    speech_density = float(metrics.get("speech_density", 0.0) or 0.0)
+    kinetic_signal = float(metrics.get("kinetic_signal", 0.0) or 0.0)
+    ensemble_signal = float(metrics.get("ensemble_signal", 0.0) or 0.0)
+    inner_state_signal = float(metrics.get("inner_state_signal", 0.0) or 0.0)
+    text_reliability = float(metrics.get("text_reliability", 0.0) or 0.0)
+    multi_speaker_ratio = float(metrics.get("multi_speaker_ratio", 0.0) or 0.0)
+
+    if text_reliability <= 0.3:
+        modifiers.append("low_text")
+        reasons.append("subtitle_or_plot_text_weak")
+    if speech_density >= 0.52 and subtitle_quality >= 0.42:
+        modifiers.append("dialogue_driven")
+        reasons.append("dialogue_dense")
+    if kinetic_signal >= 0.58:
+        modifiers.append("kinetic")
+        reasons.append("kinetic_signal_strong")
+    if ensemble_signal >= 0.54 and multi_speaker_ratio >= 0.3:
+        modifiers.append("ensemble_conflict")
+        reasons.append("multi_speaker_exchange")
+    if inner_state_signal >= 0.54:
+        modifiers.append("performance_reaction")
+        reasons.append("reaction_inner_state_strong")
+
+    route = "balanced_mixed"
+    if "low_text" in modifiers and "kinetic" in modifiers:
+        route = "visual_audio_fallback"
+    elif "dialogue_driven" in modifiers and "ensemble_conflict" in modifiers:
+        route = "ensemble_conflict"
+    elif "dialogue_driven" in modifiers:
+        route = "dialogue_driven"
+    elif "performance_reaction" in modifiers and text_reliability >= 0.4:
+        route = "performance_reaction"
+    elif "kinetic" in modifiers:
+        route = "kinetic_visual"
+    elif "low_text" in modifiers:
+        route = "visual_audio_fallback"
+
+    if not modifiers:
+        modifiers = ["balanced"]
+        reasons = ["balanced_signal_mix"]
+
+    return route, modifiers, list(dict.fromkeys(reasons))[:6]
+
+
+def _adapt_profile_to_signal_route(
+    profile: Dict[str, Any],
+    *,
+    signal_route: str,
+    signal_modifiers: Sequence[str],
+    signal_metrics: Dict[str, float],
+    signal_reasons: Sequence[str],
+) -> Dict[str, Any]:
+    adapted = copy.deepcopy(profile or {})
+    weights = dict(adapted.get("evidence_weights") or {})
+    shot_role_bias = dict(adapted.get("shot_role_bias") or {})
+    tag_bias = dict(adapted.get("tag_bias") or {})
+    raw_audio_bias = float(adapted.get("raw_audio_bias", 0.0) or 0.0)
+
+    def bump_weight(key: str, delta: float) -> None:
+        weights[key] = float(weights.get(key, 0.0) or 0.0) + float(delta or 0.0)
+
+    def bump_bias(mapping: Dict[str, Any], key: str, delta: float) -> None:
+        mapping[key] = round(float(mapping.get(key, 0.0) or 0.0) + float(delta or 0.0), 3)
+
+    modifiers = set(str(item or "").strip() for item in (signal_modifiers or []))
+    if "dialogue_driven" in modifiers:
+        bump_weight("dialogue_exchange", 0.065)
+        bump_weight("relation", 0.04)
+        bump_weight("reaction", 0.03)
+        bump_weight("inner_state", 0.025)
+        bump_weight("visible_action", -0.03)
+        bump_weight("energy", -0.02)
+        bump_bias(shot_role_bias, "dialogue_exchange", 0.04)
+        bump_bias(shot_role_bias, "single_focus", 0.025)
+    if "kinetic" in modifiers:
+        bump_weight("visible_action", 0.075)
+        bump_weight("energy", 0.06)
+        bump_weight("group_reaction", 0.02)
+        bump_weight("dialogue_exchange", -0.02)
+        bump_bias(shot_role_bias, "action_follow", 0.05)
+        bump_bias(shot_role_bias, "ensemble_relation", 0.02)
+        bump_bias(tag_bias, "conflict", 0.03)
+        raw_audio_bias += 0.03
+    if "ensemble_conflict" in modifiers:
+        bump_weight("group_reaction", 0.06)
+        bump_weight("relation", 0.04)
+        bump_weight("dialogue_exchange", 0.04)
+        bump_weight("inner_state", 0.01)
+        bump_bias(shot_role_bias, "dialogue_exchange", 0.035)
+        bump_bias(shot_role_bias, "ensemble_relation", 0.05)
+    if "performance_reaction" in modifiers:
+        bump_weight("inner_state", 0.055)
+        bump_weight("reaction", 0.04)
+        bump_weight("relation", 0.015)
+        bump_weight("visible_action", -0.02)
+        bump_bias(shot_role_bias, "single_focus", 0.05)
+    if "low_text" in modifiers:
+        bump_weight("story", -0.045)
+        bump_weight("relation", -0.02)
+        bump_weight("dialogue_exchange", -0.03)
+        bump_weight("visible_action", 0.04)
+        bump_weight("energy", 0.04)
+        raw_audio_bias += 0.025
+
+    adapted["evidence_weights"] = _normalize_weight_map(weights)
+    adapted["shot_role_bias"] = {key: round(float(value or 0.0), 3) for key, value in shot_role_bias.items()}
+    adapted["tag_bias"] = {key: round(float(value or 0.0), 3) for key, value in tag_bias.items()}
+    adapted["raw_audio_bias"] = round(max(raw_audio_bias, 0.0), 3)
+    adapted["signal_route"] = str(signal_route or "balanced_mixed")
+    adapted["signal_modifiers"] = list(dict.fromkeys(str(item) for item in (signal_modifiers or []) if str(item)))
+    adapted["signal_metrics"] = {key: _clamp_unit(value) for key, value in (signal_metrics or {}).items()}
+    adapted["signal_reasons"] = list(dict.fromkeys(str(item) for item in (signal_reasons or []) if str(item)))[:6]
+    return adapted
+
+
 def _evidence_scores(candidate_clips: Sequence[Dict[str, Any]]) -> Dict[str, float]:
     items = list(candidate_clips or [])
     return {
@@ -451,27 +674,37 @@ def _infer_profile_from_signals(
     )
     keyword_scores = _keyword_scores(text_corpus)
     evidence = _evidence_scores(candidate_clips)
+    signal_metrics = _signal_metrics(
+        subtitle_segments=subtitle_segments,
+        plot_chunks=plot_chunks,
+        candidate_clips=candidate_clips,
+    )
     scores: Dict[str, float] = {"general": 0.4}
 
     scores["action"] = keyword_scores.get("action", 0.0)
     scores["action"] += evidence["visible_action"] * 0.42 + evidence["energy"] * 0.26
     scores["action"] += evidence["conflict_ratio"] * 0.22 + evidence["raw_audio_ratio"] * 0.12
+    scores["action"] += signal_metrics["kinetic_signal"] * 0.18 + (1.0 - signal_metrics["text_reliability"]) * 0.04
 
     scores["suspense"] = keyword_scores.get("suspense", 0.0)
     scores["suspense"] += evidence["story"] * 0.24 + evidence["inner_state"] * 0.22
     scores["suspense"] += evidence["reaction"] * 0.18 + evidence["reveal_ratio"] * 0.26
+    scores["suspense"] += signal_metrics["text_reliability"] * 0.08 + signal_metrics["inner_state_signal"] * 0.07
 
     scores["drama"] = keyword_scores.get("drama", 0.0)
     scores["drama"] += evidence["emotion"] * 0.24 + evidence["relation"] * 0.24
     scores["drama"] += evidence["inner_state"] * 0.22 + evidence["emotion_peak_ratio"] * 0.2
+    scores["drama"] += signal_metrics["inner_state_signal"] * 0.12 + signal_metrics["speech_density"] * 0.06
 
     scores["comedy"] = keyword_scores.get("comedy", 0.0)
     scores["comedy"] += evidence["reaction"] * 0.24 + evidence["dialogue_exchange"] * 0.24
     scores["comedy"] += evidence["group_reaction"] * 0.22 + evidence["emotion"] * 0.08
+    scores["comedy"] += signal_metrics["ensemble_signal"] * 0.08 + signal_metrics["speech_density"] * 0.08
 
     scores["romance"] = keyword_scores.get("romance", 0.0)
     scores["romance"] += evidence["relation"] * 0.3 + evidence["inner_state"] * 0.16
     scores["romance"] += evidence["reaction"] * 0.14 + evidence["emotion_peak_ratio"] * 0.14
+    scores["romance"] += signal_metrics["inner_state_signal"] * 0.1 + signal_metrics["speech_density"] * 0.06
 
     ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     winner, winner_score = ordered[0]
@@ -491,6 +724,10 @@ def _infer_profile_from_signals(
         reasons.append("reaction_banter_density")
     if winner == "romance" and evidence["relation"] >= 0.48:
         reasons.append("relationship_density")
+    if signal_metrics["text_reliability"] <= 0.3:
+        reasons.append("low_text_reliability")
+    elif signal_metrics["speech_density"] >= 0.55:
+        reasons.append("speech_dense")
     if not reasons:
         reasons.append("fallback_general_signal_mix")
     return winner, reasons, round(confidence, 3)
@@ -508,6 +745,12 @@ def resolve_highlight_profile(
 ) -> Dict[str, Any]:
     normalized = _normalized_profile_id(requested_profile)
     capabilities = dict(capabilities or detect_highlight_capabilities())
+    signal_metrics = _signal_metrics(
+        subtitle_segments=subtitle_segments or [],
+        plot_chunks=plot_chunks or [],
+        candidate_clips=candidate_clips or [],
+    )
+    signal_route, signal_modifiers, signal_reasons = _route_signal_profile(signal_metrics)
     if normalized != "auto":
         profile = get_highlight_profile(normalized)
         profile["source"] = "user_selected"
@@ -515,7 +758,13 @@ def resolve_highlight_profile(
         profile["reasons"] = ["user_selected"]
         profile["requested_id"] = normalized
         profile["capabilities"] = capabilities
-        return profile
+        return _adapt_profile_to_signal_route(
+            profile,
+            signal_route=signal_route,
+            signal_modifiers=signal_modifiers,
+            signal_metrics=signal_metrics,
+            signal_reasons=signal_reasons,
+        )
 
     inferred_id, reasons, confidence = _infer_profile_from_signals(
         movie_title=movie_title,
@@ -532,7 +781,13 @@ def resolve_highlight_profile(
     profile["reasons"] = reasons
     profile["requested_id"] = "auto"
     profile["capabilities"] = capabilities
-    return profile
+    return _adapt_profile_to_signal_route(
+        profile,
+        signal_route=signal_route,
+        signal_modifiers=signal_modifiers,
+        signal_metrics=signal_metrics,
+        signal_reasons=signal_reasons,
+    )
 
 
 def _clip_intro_risk(item: Dict[str, Any]) -> float:

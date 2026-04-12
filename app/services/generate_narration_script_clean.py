@@ -212,6 +212,17 @@ def _build_project_context(
         "segment_start_seconds": round(start, 3),
         "segment_end_seconds": round(end, 3),
         "segment_duration_seconds": round(max(end - start, 0.0), 3),
+        "representative_frame_count": len(list(pkg.get("frame_paths") or [])),
+        "representative_frames": [
+            {
+                "frame_path": item.get("frame_path") or item.get("frame"),
+                "timestamp_seconds": item.get("timestamp_seconds"),
+                "timestamp": item.get("timestamp"),
+                "desc": item.get("desc"),
+            }
+            for item in list(pkg.get("representative_frames") or [])[:4]
+        ],
+        "visual_evidence_digest": [str(item.get("desc") or "")[:80] for item in list(pkg.get("visual_summary") or [])[:4]],
         "char_budget": int(pkg.get("char_budget", 0) or 0),
         "title_prior_usage_rule": "如果你熟悉这部影片，可以使用片名对应的既有剧情知识来辨认角色、场面和关系，但只能用于当前时间窗内的内容，不能提前剧透后续情节。",
         "speaker_names": speaker_names[:4],
@@ -331,6 +342,10 @@ def _validate_generated_narration(
             "segment_json": json.dumps(
                 {
                     "segment_id": pkg.get("segment_id"),
+                    "highlight_id": pkg.get("highlight_id"),
+                    "timestamp": pkg.get("timestamp"),
+                    "start": round(float(pkg.get("start", pkg.get("time_window", [0.0, 0.0])[0]) or 0.0), 3),
+                    "end": round(float(pkg.get("end", pkg.get("time_window", [0.0, 0.0])[1]) or 0.0), 3),
                     "plot_function": pkg.get("plot_function"),
                     "importance_level": pkg.get("importance_level"),
                     "surface_dialogue_meaning": pkg.get("surface_dialogue_meaning"),
@@ -338,6 +353,9 @@ def _validate_generated_narration(
                     "story_validation": pkg.get("story_validation"),
                     "local_understanding": pkg.get("local_understanding"),
                     "main_text_evidence": pkg.get("main_text_evidence") or pkg.get("subtitle_text"),
+                    "visual_summary": list(pkg.get("visual_summary") or [])[:4],
+                    "frame_paths": list(pkg.get("frame_paths") or [])[:6],
+                    "representative_frames": list(pkg.get("representative_frames") or [])[:4],
                     "speaker_names": list(pkg.get("speaker_names") or []),
                     "speaker_turns": int(pkg.get("speaker_turns", 0) or 0),
                     "exchange_pairs": list(pkg.get("exchange_pairs") or []),
@@ -597,6 +615,16 @@ def _build_script_item(
         "prologue_original_before_prologue_end": bool(pkg.get("prologue_original_before_prologue_end")),
         "prologue_end": pkg.get("prologue_end"),
         "semantic_timestamp": pkg.get("semantic_timestamp") or pkg.get("timestamp") or canonical_timestamp,
+        "highlight_id": pkg.get("highlight_id"),
+        "highlight_rank": pkg.get("highlight_rank"),
+        "highlight_reasons": list(pkg.get("highlight_reasons") or []),
+        "frame_paths": list(pkg.get("frame_paths") or []),
+        "visual_summary": list(pkg.get("visual_summary") or []),
+        "representative_frames": list(pkg.get("representative_frames") or []),
+        "source_segment_ids": list(pkg.get("source_segment_ids") or []),
+        "source_scene_ids": list(pkg.get("source_scene_ids") or []),
+        "source_evidence_ids": list(pkg.get("source_evidence_ids") or []),
+        "main_text_evidence": pkg.get("main_text_evidence") or pkg.get("subtitle_text") or "",
         "narration_validation": generation_result.get("narration_validation") or {},
     }
     item["fit_check"] = fit_check(item["narration"], duration)
@@ -652,6 +680,10 @@ def generate_narration_from_scene_evidence(
                     "segment_json": json.dumps(
                         {
                             "segment_id": pkg.get("segment_id"),
+                            "highlight_id": pkg.get("highlight_id"),
+                            "timestamp": pkg.get("timestamp"),
+                            "start": round(start, 3),
+                            "end": round(end, 3),
                             "plot_function": pkg.get("plot_function"),
                             "importance_level": pkg.get("importance_level"),
                             "surface_dialogue_meaning": pkg.get("surface_dialogue_meaning"),
@@ -661,6 +693,9 @@ def generate_narration_from_scene_evidence(
                             "raw_voice_retain_suggestion": pkg.get("raw_voice_retain_suggestion"),
                             "emotion_hint": pkg.get("emotion_hint"),
                             "main_text_evidence": pkg.get("main_text_evidence") or pkg.get("subtitle_text"),
+                            "visual_summary": list(pkg.get("visual_summary") or [])[:4],
+                            "frame_paths": list(pkg.get("frame_paths") or [])[:6],
+                            "representative_frames": list(pkg.get("representative_frames") or [])[:4],
                             "speaker_names": list(pkg.get("speaker_names") or []),
                             "speaker_turns": int(pkg.get("speaker_turns", 0) or 0),
                             "exchange_pairs": list(pkg.get("exchange_pairs") or []),

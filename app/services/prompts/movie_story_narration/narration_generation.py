@@ -56,7 +56,8 @@ class NarrationGenerationPrompt(ParameterizedPrompt):
 7. 输出长度要服从 `char_budget`，因为它直接决定配音时长和视频匹配节奏。
 8. 原声保留只适用于短促、情绪强、现场感强的片段；长段默认仍以解说为主。
 9. 风格优先参考样本文案，而不是自己发明口吻。
-10. 只输出 JSON，不要额外解释。
+10. `segment_json` / `project_context_json` 中如果给了 `timestamp`、`start/end`、`visual_summary`、`representative_frames`，要把它们当作当前片段的时间窗和画面证据使用。
+11. 只输出 JSON，不要额外解释。
 
 # 输出 JSON 结构
 {
