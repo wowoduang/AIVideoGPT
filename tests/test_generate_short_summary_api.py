@@ -76,8 +76,8 @@ def _stub_module(name: str, **attrs):
 
 
 def _load_module(streamlit_module, *, review_mode: str, job_status: dict, legacy_mock: Mock, save_mock: Mock):
-    short_summary_module = _stub_module(
-        "webui.tools.generate_short_summary",
+    support_module = _stub_module(
+        "webui.services.movie_story_script_support",
         _build_request=lambda params, subtitle_path, video_theme, temperature: {
             "video_path": params.video_origin_path,
             "subtitle_path": subtitle_path,
@@ -88,6 +88,9 @@ def _load_module(streamlit_module, *, review_mode: str, job_status: dict, legacy
         _normalize_subtitle_path=lambda subtitle_path, subtitle_mode: subtitle_path,
         _resolve_review_mode=lambda: review_mode,
         _save_pipeline_success=save_mock,
+    )
+    short_summary_module = _stub_module(
+        "webui.tools.generate_short_summary",
         generate_script_short_sunmmary=legacy_mock,
     )
     job_runner_module = _stub_module(
@@ -101,12 +104,24 @@ def _load_module(streamlit_module, *, review_mode: str, job_status: dict, legacy
         },
         get_job_status=lambda task_id, transport: job_status,
     )
+    job_execution_module = _stub_module(
+        "webui.services.job_execution",
+        extract_job_result=lambda task, fallback_keys: task.get("result", {}) or dict(task),
+        poll_job_until_complete=lambda **kwargs: (
+            kwargs["on_complete"](kwargs["extract_result"]({
+                "result": job_status.get("result", {}),
+                **job_status,
+            })) if job_status.get("status") == "complete" else None
+        ),
+    )
     webui_utils_module = _stub_module("webui.utils", job_runner=job_runner_module)
     loguru_module = _stub_module("loguru", logger=_Logger())
 
     stubbed_modules = {
         "streamlit": streamlit_module,
         "loguru": loguru_module,
+        "webui.services.job_execution": job_execution_module,
+        "webui.services.movie_story_script_support": support_module,
         "webui.tools.generate_short_summary": short_summary_module,
         "webui.utils": webui_utils_module,
         "webui.utils.job_runner": job_runner_module,

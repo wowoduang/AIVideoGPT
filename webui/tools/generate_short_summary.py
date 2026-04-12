@@ -2,9 +2,7 @@
 # -*- coding: UTF-8 -*-
 from __future__ import annotations
 
-import json
 import os
-import re
 import time
 import traceback
 
@@ -12,72 +10,31 @@ import streamlit as st
 from loguru import logger
 
 from app.config import config
+from app.utils.json_utils import parse_and_fix_json
 from app.services.subtitle_first_pipeline import run_subtitle_first_pipeline
 from app.services.subtitle_pipeline import build_subtitle_segments
 from app.services.subtitle_review_clean import apply_review_overrides, prepare_subtitle_review
 from app.services.subtitle_text import read_subtitle_text
+from webui.services.movie_story_script_support import (
+    PENDING_SUBTITLE_SOURCE_MODE_KEY,
+    _build_request,
+    _normalize_subtitle_mode,
+    _normalize_subtitle_path,
+    _resolve_review_mode,
+    _save_pipeline_success,
+)
 
 import app.services.llm  # noqa: F401
 
 
 REVIEW_REQUEST_KEY = "subtitle_review_request"
 REVIEW_STATE_KEY = "subtitle_review_state"
-PENDING_SUBTITLE_SOURCE_MODE_KEY = "_pending_subtitle_source_mode"
-
-
-def parse_and_fix_json(json_string):
-    if not json_string or not json_string.strip():
-        return None
-
-    json_string = json_string.strip()
-
-    try:
-        return json.loads(json_string)
-    except Exception:
-        pass
-
-    try:
-        fixed_braces = json_string.replace("{{", "{").replace("}}", "}")
-        return json.loads(fixed_braces)
-    except Exception:
-        pass
-
-    try:
-        json_match = re.search(r"```json\s*(.*?)\s*```", json_string, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1).strip())
-    except Exception:
-        pass
-
-    return None
-
-
-def _normalize_subtitle_mode() -> str:
-    mode = st.session_state.get("subtitle_source_mode", "existing_subtitle")
-    return str(mode or "existing_subtitle").strip()
-
-
-def _normalize_subtitle_path(subtitle_path: str, subtitle_mode: str) -> str:
-    value = str(subtitle_path or "").strip()
-    if value.upper() == "AUTO":
-        return ""
-    if subtitle_mode == "auto_subtitle":
-        return ""
-    return value
-
-
 def _resolve_asr_backend() -> str:
     return str(st.session_state.get("subtitle_asr_backend", "faster-whisper") or "faster-whisper").strip()
 
 
 def _resolve_cache_mode() -> str:
     return str(st.session_state.get("subtitle_cache_mode", "clear_and_regenerate") or "clear_and_regenerate").strip()
-
-
-def _resolve_review_mode() -> str:
-    return str(st.session_state.get("subtitle_review_mode", "review_suspicious") or "review_suspicious").strip()
-
-
 def _resolve_prologue_strategy() -> str:
     return str(st.session_state.get("prologue_strategy", "speech_first") or "speech_first").strip()
 

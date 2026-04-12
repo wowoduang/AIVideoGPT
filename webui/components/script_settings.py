@@ -15,6 +15,7 @@ from app.services.subtitle_text import decode_subtitle_bytes
 from app.services.timeline_allocator import fit_check
 from app.utils import utils
 from webui.components.subtitle_first_mode_panel import render_subtitle_first_mode_panel
+from webui.services.movie_story_script_support import PENDING_SUBTITLE_SOURCE_MODE_KEY
 from webui.services.script_persistence import save_script_with_validation
 from webui.services.script_actions import (
     MODE_FILE,
@@ -26,8 +27,6 @@ from webui.services.script_actions import (
     run_script_action,
 )
 from webui.utils import file_utils
-
-PENDING_SUBTITLE_SOURCE_MODE_KEY = "_pending_subtitle_source_mode"
 
 OST_OPTIONS = [0, 1, 2]
 OST_LABELS = {

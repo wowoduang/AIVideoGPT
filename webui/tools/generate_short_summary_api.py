@@ -8,14 +8,14 @@ import streamlit as st
 from loguru import logger
 
 from webui.services.job_execution import extract_job_result, poll_job_until_complete
-from webui.tools.generate_short_summary import (
+from webui.services.movie_story_script_support import (
     _build_request,
     _normalize_subtitle_mode,
     _normalize_subtitle_path,
     _resolve_review_mode,
     _save_pipeline_success,
-    generate_script_short_sunmmary as legacy_generate_script_short_sunmmary,
 )
+from webui.tools.generate_short_summary import generate_script_short_sunmmary as legacy_generate_script_short_sunmmary
 from webui.utils import job_runner
 
 

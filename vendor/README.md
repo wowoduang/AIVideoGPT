@@ -27,5 +27,5 @@ Recommended layout:
 ## 推荐搭配
 
 - 第三方源码：`vendor/<tool-name>/`
-- 第三方运行时：`storage/runtime/third_party/<tool-name>/`
-- 第三方缓存：`storage/cache/<tool-name>/`
+- 第三方运行时：`workspace/runtime/third_party/<tool-name>/`
+- 第三方缓存：`workspace/cache/<tool-name>/`

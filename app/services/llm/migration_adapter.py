@@ -112,7 +112,7 @@ class LegacyLLMAdapter:
             )
 
             # 使用增强的JSON解析器
-            from webui.tools.generate_short_summary import parse_and_fix_json
+            from app.utils.json_utils import parse_and_fix_json
             parsed_result = parse_and_fix_json(result)
 
             if not parsed_result:

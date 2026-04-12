@@ -9,6 +9,8 @@ Quick reference:
 - Source code: `app/`, `webui/`, `tools/`, `vendor/`, `tests/`, static files under `resource/`
 - UI service layer: `webui/services/` keeps Streamlit-side orchestration helpers out of page layout files
 - Script persistence helpers: `webui/services/script_persistence.py` centralizes script load/save behavior outside page files
+- Movie story script helpers: `webui/services/movie_story_script_support.py` keeps subtitle-first request/session helpers out of tool entrypoints
+- Shared JSON repair helpers: `app/utils/json_utils.py`
 - Local API entrypoint: `local_api.py`, backed by `app/api/`
 - Local API default address: `http://127.0.0.1:18000` unless overridden by `app.local_api_base_url` or `app.local_api_host` / `app.local_api_port`
 - External workspace: `models/`, `videos/`, `subtitles/`, `scripts/`, `analysis/`, `fonts/`, `songs/`, `temp/`, `cache/`, `runtime/`, `state/`, `tasks/`
