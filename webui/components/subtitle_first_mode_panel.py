@@ -73,7 +73,7 @@ def render_subtitle_first_mode_panel(tr=None, show_source_mode: bool = True):
     init_subtitle_first_mode_state()
     _prime_widget_state()
 
-    with st.expander(_label(tr, "影视解说 / 字幕优先模式设置"), expanded=True):
+    with st.expander(_label(tr, "影视解说模式设置"), expanded=True):
         if show_source_mode:
             st.selectbox(
                 _label(tr, "字幕来源"),

@@ -21,7 +21,7 @@ from webui.tools.base import create_vision_analyzer
 
 
 def generate_script_docu(params):
-    """字幕优先的视频脚本生成：字幕/ASR 做主理解，视觉补充可选。"""
+    """影视解说主链：字幕/ASR 做主理解，视觉补充可选。"""
     progress_bar = st.progress(0)
     status_text = st.empty()
 
@@ -47,7 +47,7 @@ def generate_script_docu(params):
             )
 
             if subtitle_success:
-                st.success(f"✅ 已获得字幕，共 {len(subtitle_segments)} 段，进入字幕优先模式")
+                st.success(f"✅ 已获得字幕，共 {len(subtitle_segments)} 段，进入影视解说模式")
                 if enable_visual_supplement:
                     st.info("🖼️ 已启用视觉补充：将在字幕主理解基础上分析少量代表帧")
                 else:

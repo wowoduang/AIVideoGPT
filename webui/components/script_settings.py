@@ -151,7 +151,7 @@ def render_script_mode(tr):
         tr("Select/Upload Script"): MODE_FILE,
         tr("短剧混剪"): MODE_SHORT,
         tr("短剧解说"): MODE_SHORT_SUMMARY,
-        tr("字幕优先生成"): MODE_SUBTITLE_FIRST,
+        tr("影视解说生成"): MODE_SUBTITLE_FIRST,
     }
     mode_options[tr("精彩粗剪")] = MODE_HIGHLIGHT_EDIT
     reverse_options = {v: k for k, v in mode_options.items()}
