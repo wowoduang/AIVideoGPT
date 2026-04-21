@@ -35,6 +35,7 @@ export type JobStatusResponse = {
 
 export type UploadResponse = {
   path: string;
+  url: string;
   filename: string;
   size: number;
   kind: 'video' | 'subtitle';

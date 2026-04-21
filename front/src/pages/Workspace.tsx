@@ -16,6 +16,7 @@ import {
   extractVideoOutputs,
   type SubtitleLine,
 } from '@/lib/api';
+import { getAPIBaseURL } from '@/lib/config';
 import { Zap, ChevronLeft, ChevronRight, RotateCcw, Bell, User, Check, Loader2, AlertTriangle, FolderOpen, X } from 'lucide-react';
 
 type ProjectType = 'movie_review' | 'drama_mix' | 'drama_review';
@@ -184,7 +185,8 @@ export default function Workspace() {
       setIsUploadingVideo(true);
       setStatusMessage('正在上传视频到后端工作区...');
       const result = await uploadVideo(file);
-      setUploadedVideoPath(result.url || result.path);
+      console.log('Upload result:', result);
+      setUploadedVideoPath(result.url && result.url.startsWith('/') ? result.url : result.path);
       setStatusMessage(`视频上传完成：${result.filename}`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '视频上传失败');
@@ -381,8 +383,8 @@ export default function Workspace() {
       )}
 
       <div className="flex-1 overflow-hidden">
-        {currentStep === 'upload' && <VideoUploadStep uploadedFile={uploadedFile} onFileSelect={handleVideoFileSelect} onNext={handleNext} onBack={handlePrev} videoUrl={uploadedVideoPath} />}
-        {currentStep === 'subtitle' && <SubtitleStep subtitleMode={subtitleMode} onModeSelect={setSubtitleMode} isRecognizing={isRecognizing} recognitionDone={recognitionDone} onStartRecognition={handleStartRecognition} subtitles={subtitles} onSubtitlesChange={setSubtitles} onSubtitleFileSelect={handleSubtitleFileSelect} videoFile={uploadedFile} videoUrl={uploadedVideoPath ? `/uploads/video/${uploadedVideoPath.split('/').pop()}` : ''} onReupload={handleReset} />}
+        {currentStep === 'upload' && <VideoUploadStep uploadedFile={uploadedFile} onFileSelect={handleVideoFileSelect} onNext={handleNext} onBack={handlePrev} videoUrl={uploadedVideoPath ? `${getAPIBaseURL()}${uploadedVideoPath}` : ''} />}
+        {currentStep === 'subtitle' && <SubtitleStep subtitleMode={subtitleMode} onModeSelect={setSubtitleMode} isRecognizing={isRecognizing} recognitionDone={recognitionDone} onStartRecognition={handleStartRecognition} subtitles={subtitles} onSubtitlesChange={setSubtitles} onSubtitleFileSelect={handleSubtitleFileSelect} videoFile={uploadedFile} videoUrl={uploadedVideoPath ? `${getAPIBaseURL()}${uploadedVideoPath}` : ''} onReupload={handleReset} />}
         {currentStep === 'config' && <ConfigStep projectType={project?.type || 'movie_review'} value={config} onChange={setConfig} onGenerate={handleGenerate} generating={isGenerating} onBack={() => setCurrentStep('subtitle')} onReupload={handleReset} />}
         {currentStep === 'generate' && (
           <div className="h-full flex items-center justify-center px-6">

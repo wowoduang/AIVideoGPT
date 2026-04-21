@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { CloudUpload, ArrowLeft, RefreshCw, ArrowRight, AlertTriangle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -15,21 +15,25 @@ export default function VideoUploadStep({ uploadedFile, onFileSelect, onNext, on
   const [showReuploadConfirm, setShowReuploadConfirm] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [videoDuration, setVideoDuration] = useState(207.3);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(207.3);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 监听上传进度完成
-  useEffect(() => {
-    if (uploadProgress >= 100 && pendingFile) {
-      setIsUploading(false);
-      onFileSelect(pendingFile);
-      setPendingFile(null);
+  // 清理定时器
+  const clearUploadInterval = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-  }, [uploadProgress, pendingFile, onFileSelect]);
+  }, []);
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => clearUploadInterval();
+  }, [clearUploadInterval]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -63,22 +67,32 @@ export default function VideoUploadStep({ uploadedFile, onFileSelect, onNext, on
     }
   };
 
-  const simulateUpload = (file: File) => {
+  const simulateUpload = useCallback((file: File) => {
+    // 清理之前的定时器
+    clearUploadInterval();
+    
     setIsUploading(true);
     setUploadProgress(0);
-    setPendingFile(file);
     
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setUploadProgress((prev) => {
-        const newProgress = prev + Math.random() * 15;
+        const increment = Math.random() * 15;
+        const newProgress = prev + increment;
+        
         if (newProgress >= 100) {
-          clearInterval(interval);
+          // 上传完成
+          clearUploadInterval();
+          // 使用 setTimeout 确保状态更新顺序正确
+          setTimeout(() => {
+            setIsUploading(false);
+            onFileSelect(file);
+          }, 100);
           return 100;
         }
         return newProgress;
       });
     }, 200);
-  };
+  }, [clearUploadInterval, onFileSelect]);
 
   const handleReuploadClick = () => {
     setShowReuploadConfirm(true);
@@ -86,8 +100,15 @@ export default function VideoUploadStep({ uploadedFile, onFileSelect, onNext, on
 
   const handleConfirmReupload = () => {
     setShowReuploadConfirm(false);
+    // 重置裁剪状态
+    setVideoDuration(207.3);
+    setTrimStart(0);
+    setTrimEnd(207.3);
     onFileSelect(null);
-    fileInputRef.current?.click();
+    // 延迟触发文件选择，确保状态已更新
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 0);
   };
 
   const handleCancelReupload = () => {
@@ -153,19 +174,25 @@ export default function VideoUploadStep({ uploadedFile, onFileSelect, onNext, on
               <div className="relative bg-black flex items-center justify-center" style={{ minHeight: '300px' }}>
                 {videoUrl ? (
                   <video
-                    ref={videoRef}
+                    key={videoUrl}
                     src={videoUrl}
                     className="max-w-full max-h-[400px] w-auto h-auto"
                     controls
                     preload="metadata"
                     onLoadedMetadata={(e) => {
                       const video = e.target as HTMLVideoElement;
+                      console.log('[VideoUploadStep] Video loaded, duration:', video.duration, 'url:', videoUrl);
                       setVideoDuration(video.duration || 207.3);
                       setTrimEnd(video.duration || 207.3);
                     }}
+                    onError={(e) => {
+                      const video = e.target as HTMLVideoElement;
+                      console.error('[VideoUploadStep] Video load error:', video.error, 'url:', videoUrl);
+                      alert('视频加载失败: ' + videoUrl);
+                    }}
                   />
                 ) : (
-                  <div className="text-slate-500 text-sm">视频加载中...</div>
+                  <div className="text-slate-500 text-sm">视频加载中... (videoUrl: {videoUrl || 'empty'})</div>
                 )}
               </div>
 
