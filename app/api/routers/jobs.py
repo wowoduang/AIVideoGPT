@@ -12,6 +12,7 @@ from app.api.schemas.jobs import (
     MovieStoryJobCreateRequest,
     VideoJobCreateRequest,
 )
+from app.config import config
 from app.services import auth_store, job_history
 from app.services.local_job_runner import (
     get_task_snapshot,

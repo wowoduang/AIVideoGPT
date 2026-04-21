@@ -37,9 +37,6 @@ class MovieStoryScriptRequest(BaseModel):
     subtitle_path: str = ""
     video_theme: str = ""
     temperature: float = 0.7
-    text_api_key: str = ""
-    text_model: str = ""
-    text_base_url: str = ""
     narration_style: str = "general"
     generation_mode: str = "balanced"
     visual_mode: str = "auto"

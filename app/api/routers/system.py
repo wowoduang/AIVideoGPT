@@ -21,3 +21,17 @@ def get_workspace_info():
         layout=workspace.workspace_layout_paths(create=False),
         task_root=utils.task_dir(),
     )
+
+
+@router.get("/config")
+def get_runtime_config():
+    """
+    获取运行时配置（供前端使用）
+    """
+    host = config.app.get("local_api_host", "127.0.0.1")
+    port = config.app.get("local_api_port", 18000)
+    return {
+        "API_BASE_URL": f"http://{host}:{port}",
+        "project_name": config.project_name,
+        "project_version": config.project_version,
+    }

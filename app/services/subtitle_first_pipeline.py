@@ -20,6 +20,7 @@ from app.services.plot_understanding_clean import (
 from app.services.preflight_check import PreflightError, validate_script_items
 from app.services.representative_frames import extract_representative_frames_for_scenes
 from app.services.script_fallback import ensure_script_shape
+from app.services.llm_config import get_text_llm_config
 from app.services.story_boundary_aligner import align_story_boundaries, collect_candidate_boundaries
 from app.services.story_validator_clean import validate_story_segments
 from app.services.subtitle_pipeline import build_subtitle_segments
@@ -152,14 +153,30 @@ def _resolve_visual_mode(visual_mode: str) -> str:
     return "auto"
 
 
-def _ensure_llm_ready(api_key: str, base_url: str, model: str) -> None:
+def _ensure_llm_ready(api_key: str, base_url: str, model: str) -> tuple:
+    """
+    确保 LLM 配置就绪，如果参数为空则从 config.app 读取
+    
+    Returns:
+        tuple: (api_key, base_url, model) - 确保都有值的配置
+    """
+    cfg = get_text_llm_config()
+    
+    # 优先使用传入的参数，如果为空则从配置读取
+    final_api_key = str(api_key or "").strip() or cfg.get('api_key', '')
+    final_model = str(model or "").strip() or cfg.get('model', '')
+    final_base_url = str(base_url or "").strip() or cfg.get('base_url', '')
+    
+    # 检查是否仍缺少配置
     missing = []
-    if not str(api_key or "").strip():
+    if not final_api_key:
         missing.append("text_api_key")
-    if not str(model or "").strip():
+    if not final_model:
         missing.append("text_model")
     if missing:
         raise ValueError(f"字幕优先影视解说链需要完整的 LLM 配置，缺少: {', '.join(missing)}")
+    
+    return final_api_key, final_base_url, final_model
 
 
 def _collect_scene_cut_points(video_path: str, segments: List[Dict], scene_overrides: Dict[str, Any]) -> List[float]:
@@ -2158,7 +2175,8 @@ def _run(
     asr_backend: str,
     regenerate_subtitle: bool,
 ) -> Dict[str, Any]:
-    _ensure_llm_ready(text_api_key, text_base_url, text_model)
+    # 确保 LLM 配置就绪（从参数或配置读取）
+    text_api_key, text_base_url, text_model = _ensure_llm_ready(text_api_key, text_base_url, text_model)
     asr_backend = str(asr_backend or "faster-whisper").strip() or "faster-whisper"
     target_minutes = _resolve_target_minutes(generation_mode, scene_overrides)
     effective_visual_mode = _resolve_visual_mode(visual_mode or scene_overrides.get("visual_mode", "auto"))
@@ -2169,12 +2187,35 @@ def _run(
     video_title = str(scene_overrides.get("video_title") or scene_overrides.get("short_name") or "").strip()
 
     progress(10, "字幕解析与标准化...")
-    sub_result = build_subtitle_segments(
-        video_path=video_path,
-        explicit_subtitle_path=subtitle_path,
-        regenerate=regenerate_subtitle,
-        backend_override=asr_backend,
-    )
+    
+    # 启动一个后台线程来模拟字幕识别进度（因为 build_subtitle_segments 没有进度回调）
+    import threading
+    import time
+    
+    stop_progress_simulator = threading.Event()
+    def simulate_subtitle_progress():
+        """模拟字幕识别进度，从 10% 到 16%"""
+        for i in range(11, 17):  # 11% 到 16%
+            if stop_progress_simulator.wait(2):  # 每 2 秒更新一次
+                break
+            progress(i, f"字幕识别中... ({i}%)")
+    
+    # 启动进度模拟线程
+    progress_thread = threading.Thread(target=simulate_subtitle_progress)
+    progress_thread.start()
+    
+    try:
+        sub_result = build_subtitle_segments(
+            video_path=video_path,
+            explicit_subtitle_path=subtitle_path,
+            regenerate=regenerate_subtitle,
+            backend_override=asr_backend,
+        )
+    finally:
+        # 停止进度模拟
+        stop_progress_simulator.set()
+        progress_thread.join(timeout=1)
+    
     segments = sub_result.get("segments") or []
     if not segments:
         raise ValueError(f"无法获取有效字幕 (source={sub_result.get('source')}, error={sub_result.get('error', '')})")

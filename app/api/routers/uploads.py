@@ -23,7 +23,8 @@ def _upload_root(kind: str) -> Path:
 
 async def _save_upload(kind: str, file: UploadFile) -> dict:
     filename = _safe_name(file.filename or f"{kind}.bin")
-    target = _upload_root(kind) / f"{uuid4().hex}_{filename}"
+    unique_filename = f"{uuid4().hex}_{filename}"
+    target = _upload_root(kind) / unique_filename
     content = await file.read()
     target.write_bytes(content)
     return {
@@ -31,6 +32,7 @@ async def _save_upload(kind: str, file: UploadFile) -> dict:
         "filename": filename,
         "size": len(content),
         "kind": kind,
+        "url": f"/uploads/{kind}/{unique_filename}",
     }
 
 
@@ -63,9 +65,7 @@ def subtitle_content(path: str = Query(...)):
     if not text:
         return []
 
-    blocks = re.split(r"
-\s*
-+", text)
+    blocks = re.split(r"\n\s*\n+", text)
     lines = []
     for index, block in enumerate(blocks, start=1):
         raw_lines = [line.strip() for line in block.splitlines() if line.strip()]

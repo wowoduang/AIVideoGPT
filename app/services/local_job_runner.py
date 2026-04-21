@@ -61,6 +61,7 @@ def _mark_job_failed(task_id: str, job_type: str, err: Exception, **extra: Any) 
     existing = sm.state.get_task(task_id) or {}
     payload = dict(existing)
     payload.update(extra)
+    task_dir = str(payload.get("task_dir", utils.task_dir(task_id)))
     sm.state.update_task(
         task_id,
         state=const.TASK_STATE_FAILED,
@@ -69,19 +70,18 @@ def _mark_job_failed(task_id: str, job_type: str, err: Exception, **extra: Any) 
         status="failed",
         message=str(err),
         error=str(err),
-        task_dir=str(payload.get("task_dir", utils.task_dir(task_id))),
-        **{k: v for k, v in payload.items() if k not in {"state", "progress", "status", "message", "error", "job_type"}},
+        task_dir=task_dir,
+        **{k: v for k, v in payload.items() if k not in {"state", "progress", "status", "message", "error", "job_type", "task_dir"}},
     )
 
 
 def _mark_job_complete(task_id: str, job_type: str, *, message: str = "complete", **extra: Any) -> None:
     task_dir = str((extra.get("task_dir") or utils.task_dir(task_id)))
-    payload = dict(extra)
-    payload.setdefault("task_dir", task_dir)
+    # 构建 payload，排除已单独处理的字段
     payload = {
         k: v
-        for k, v in payload.items()
-        if k not in {"state", "progress", "status", "message", "job_type"}
+        for k, v in extra.items()
+        if k not in {"state", "progress", "status", "message", "job_type", "task_dir"}
     }
     sm.state.update_task(
         task_id,

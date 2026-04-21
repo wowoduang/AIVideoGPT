@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Sequence
 
 from loguru import logger
 
+from app.services.llm_config import get_text_llm_config
 from app.services.llm_text_completion import call_text_chat_completion
 from app.services.prompts import PromptManager
 
@@ -25,6 +26,14 @@ EMOTION_CUES = {
 
 
 def _call_chat_completion(prompt: str, api_key: str = "", base_url: str = "", model: str = "") -> str:
+    """调用 LLM，如果参数未提供则从 config.app 统一读取"""
+    # 新 UI 架构：如果参数为空，从配置读取
+    if not api_key or not model:
+        cfg = get_text_llm_config()
+        api_key = api_key or cfg['api_key']
+        model = model or cfg['model']
+        base_url = base_url or cfg['base_url']
+    
     return call_text_chat_completion(
         prompt,
         api_key=api_key,

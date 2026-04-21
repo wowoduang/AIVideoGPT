@@ -153,7 +153,12 @@ def save_config():
         raise last_error
 
 
+# ============================================
+# 加载配置
+# ============================================
 _cfg = load_config(config_file)
+
+# ---- 核心配置 ----
 app = _cfg.get("app", {})
 whisper = _cfg.get("whisper", {})
 proxy = _cfg.get("proxy", {})
@@ -164,6 +169,16 @@ ui = _cfg.get("ui", {})
 frames = _cfg.get("frames", {})
 tts_qwen = _cfg.get("tts_qwen", {})
 indextts2 = _cfg.get("indextts2", {})
+tts = _cfg.get("tts", {})  # 新增 TTS 统一配置
+
+# ============================================
+# 配置兼容性处理
+# ============================================
+
+# ---- 百炼 API Key 统一 ----
+# 优先使用 whisper.bailian_api_key，如果没有则尝试 tts_qwen.api_key
+if not whisper.get("bailian_api_key") and tts_qwen.get("api_key"):
+    whisper["bailian_api_key"] = tts_qwen["api_key"]
 
 hostname = socket.gethostname()
 

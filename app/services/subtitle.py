@@ -111,12 +111,16 @@ def _normalize_backend() -> str:
             return "funasr"
         if "whisper" in backend_name:
             return "faster-whisper"
+        if "bailian" in backend_name or "qwen3-asr" in backend_name:
+            return "bailian"
         return backend_name
     lowered = str(model_size or "").strip().lower()
     if "sensevoice" in lowered:
         return "sensevoice"
     if "paraformer" in lowered:
         return "funasr"
+    if "bailian" in lowered or "qwen3-asr" in lowered:
+        return "bailian"
     return "faster-whisper"
 
 
@@ -136,6 +140,8 @@ def _resolve_runtime_backend(backend_override: Optional[str] = None) -> str:
         return "funasr"
     if "whisper" in value:
         return "faster-whisper"
+    if "bailian" in value or "qwen3-asr" in value:
+        return "bailian"
     return CURRENT_BACKEND
 
 
@@ -842,6 +848,64 @@ def _create_with_external_backend(video_file: str, audio_file: str, subtitle_fil
     )
 
 
+def _create_with_bailian(audio_file: str, subtitle_file: str = "", model: str = ""):
+    """使用阿里云百炼 ASR 生成字幕"""
+    try:
+        from app.services.asr_bailian import recognize_with_bailian
+        
+        if not subtitle_file:
+            subtitle_file = f"{audio_file}.srt"
+        
+        raw_srt_path, clean_srt_path = _derive_debug_paths(subtitle_file)
+        segments_json_path = _derive_segments_json_path(subtitle_file)
+        
+        # 调用百炼 ASR
+        segments = recognize_with_bailian(
+            audio_path=audio_file,
+            model=model or "qwen3-asr-flash",
+            language=DEFAULT_FORCE_LANGUAGE or "zh"
+        )
+        
+        if not segments:
+            logger.warning("百炼 ASR 未返回结果")
+            return None
+        
+        # 转换为字幕格式
+        subtitles: List[Dict[str, Any]] = []
+        raw_subtitles: List[Dict[str, Any]] = []
+        
+        for seg in segments:
+            text = seg.get("text", "")
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+            
+            if not text:
+                continue
+            
+            _append_raw_subtitle_line(raw_subtitles, text, start, end)
+            _append_split_subtitle_lines(subtitles, text, start, end)
+        
+        if not subtitles:
+            return None
+        
+        raw_subtitles = _merge_overlapping_subtitles(raw_subtitles)
+        subtitles = _merge_overlapping_subtitles(subtitles)
+        
+        raw_srt = _subtitles_to_srt(raw_subtitles)
+        clean_srt = _subtitles_to_srt(subtitles)
+        
+        _write_text_file(raw_srt_path, raw_srt)
+        _write_text_file(clean_srt_path, clean_srt)
+        _write_text_file(subtitle_file, clean_srt)
+        _write_segments_json(segments_json_path, subtitles, source="auto_clean", backend="bailian")
+        
+        return subtitle_file if os.path.exists(subtitle_file) else None
+        
+    except Exception as e:
+        logger.error(f"百炼 ASR 字幕生成失败: {e}")
+        return None
+
+
 def create(audio_file, subtitle_file: str = "", backend_override: str = "", model_override: str = "", video_file: str = "", **kwargs):
     backend = _resolve_runtime_backend(backend_override)
     logger.info(f"字幕生成后端: requested={backend_override or CURRENT_BACKEND}, resolved={backend}")
@@ -850,6 +914,11 @@ def create(audio_file, subtitle_file: str = "", backend_override: str = "", mode
         if result:
             return result
         logger.warning("external subtitle backend failed, fallback to native ASR: backend={}", backend)
+    if backend == "bailian":
+        result = _create_with_bailian(audio_file, subtitle_file, model_override)
+        if result:
+            return result
+        logger.warning("百炼 ASR 字幕生成失败，回退到 SenseVoice")
     if backend in {"sensevoice", "funasr"}:
         result = _create_with_sensevoice(audio_file, subtitle_file)
         if result:

@@ -16,7 +16,7 @@ import {
   extractVideoOutputs,
   type SubtitleLine,
 } from '@/lib/api';
-import { Zap, ChevronLeft, ChevronRight, RotateCcw, Bell, User, Check, Loader2, AlertTriangle, FolderOpen } from 'lucide-react';
+import { Zap, ChevronLeft, ChevronRight, RotateCcw, Bell, User, Check, Loader2, AlertTriangle, FolderOpen, X } from 'lucide-react';
 
 type ProjectType = 'movie_review' | 'drama_mix' | 'drama_review';
 type WorkflowStep = 'upload' | 'subtitle' | 'config' | 'generate';
@@ -37,7 +37,24 @@ const projectTypeLabels: Record<ProjectType, string> = {
 interface Project { name: string; type: ProjectType; }
 
 const defaultConfig: ConfigFormValue = {
+  // 基础配置
   editMode: 'smart_insert',
+  originalRatio: 45,
+  videoLanguage: 'zh',
+  narrationLanguage: 'zh',
+  
+  // 解说配置
+  generationMode: 'auto',
+  speechSpeed: 'moderate',
+  wordCount: 'default',
+  perspective: 'third',
+  narrationStyle: 'default',
+  
+  // 高级选项
+  scriptType: 'standard',
+  temperature: 0.7,
+  
+  // 后端现有参数
   ttsEngine: 'edge-tts',
   voiceRole: 'female_gentle',
   speed: 1,
@@ -133,6 +150,23 @@ export default function Workspace() {
     if (idx > 0) setCurrentStep(stepLabels[idx - 1].key);
   };
 
+  const handleReset = () => {
+    setUploadedFile(null);
+    setUploadedVideoPath('');
+    setUploadedSubtitlePath('');
+    setSubtitleMode(null);
+    setSubtitles([]);
+    setRecognitionDone(false);
+    setGeneratedScriptItems([]);
+    setGeneratedScriptPath('');
+    setGeneratedVideos([]);
+    setGenerateTaskId('');
+    setErrorMessage('');
+    setStatusMessage('');
+    setConfig(defaultConfig);
+    setCurrentStep('upload');
+  };
+
   const handleVideoFileSelect = async (file: File | null) => {
     setUploadedFile(file);
     setUploadedVideoPath('');
@@ -150,7 +184,7 @@ export default function Workspace() {
       setIsUploadingVideo(true);
       setStatusMessage('正在上传视频到后端工作区...');
       const result = await uploadVideo(file);
-      setUploadedVideoPath(result.path);
+      setUploadedVideoPath(result.url || result.path);
       setStatusMessage(`视频上传完成：${result.filename}`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '视频上传失败');
@@ -315,15 +349,41 @@ export default function Workspace() {
 
       {(statusMessage || errorMessage) && (
         <div className="px-6 pb-3 shrink-0">
-          {statusMessage && <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200 flex items-center gap-2"><Loader2 className={`w-4 h-4 ${isUploadingVideo || isUploadingSubtitle || isRecognizing || isGenerating ? 'animate-spin' : ''}`} />{statusMessage}</div>}
-          {errorMessage && <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{errorMessage}</div>}
+          {statusMessage && (
+            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Loader2 className={`w-4 h-4 ${isUploadingVideo || isUploadingSubtitle || isRecognizing || isGenerating ? 'animate-spin' : ''}`} />
+                {statusMessage}
+              </div>
+              <button 
+                onClick={() => setStatusMessage('')}
+                className="text-indigo-400 hover:text-indigo-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          {errorMessage && (
+            <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {errorMessage}
+              </div>
+              <button 
+                onClick={() => setErrorMessage('')}
+                className="text-red-400 hover:text-red-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       <div className="flex-1 overflow-hidden">
-        {currentStep === 'upload' && <VideoUploadStep uploadedFile={uploadedFile} onFileSelect={handleVideoFileSelect} />}
-        {currentStep === 'subtitle' && <SubtitleStep subtitleMode={subtitleMode} onModeSelect={setSubtitleMode} isRecognizing={isRecognizing} recognitionDone={recognitionDone} onStartRecognition={handleStartRecognition} subtitles={subtitles} onSubtitlesChange={setSubtitles} onSubtitleFileSelect={handleSubtitleFileSelect} />}
-        {currentStep === 'config' && <ConfigStep projectType={project.type} value={config} onChange={setConfig} onGenerate={handleGenerate} generating={isGenerating} />}
+        {currentStep === 'upload' && <VideoUploadStep uploadedFile={uploadedFile} onFileSelect={handleVideoFileSelect} onNext={handleNext} onBack={handlePrev} videoUrl={uploadedVideoPath} />}
+        {currentStep === 'subtitle' && <SubtitleStep subtitleMode={subtitleMode} onModeSelect={setSubtitleMode} isRecognizing={isRecognizing} recognitionDone={recognitionDone} onStartRecognition={handleStartRecognition} subtitles={subtitles} onSubtitlesChange={setSubtitles} onSubtitleFileSelect={handleSubtitleFileSelect} videoFile={uploadedFile} videoUrl={uploadedVideoPath ? `/uploads/video/${uploadedVideoPath.split('/').pop()}` : ''} onReupload={handleReset} />}
+        {currentStep === 'config' && <ConfigStep projectType={project?.type || 'movie_review'} value={config} onChange={setConfig} onGenerate={handleGenerate} generating={isGenerating} onBack={() => setCurrentStep('subtitle')} onReupload={handleReset} />}
         {currentStep === 'generate' && (
           <div className="h-full flex items-center justify-center px-6">
             <div className="w-full max-w-3xl rounded-2xl border border-white/[0.06] bg-white/[0.03] p-8">
@@ -340,14 +400,6 @@ export default function Workspace() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="h-16 border-t border-white/[0.06] bg-[#0A0A0F] flex items-center justify-between px-6 shrink-0">
-        <div>{currentStepIndex > 0 && <Button variant="ghost" size="sm" onClick={handlePrev} className="text-slate-400 hover:text-white gap-1.5"><ChevronLeft className="w-4 h-4" />返回</Button>}</div>
-        <div className="flex items-center gap-2">
-          {(currentStep === 'upload' && uploadedFile) && <Button variant="ghost" size="sm" onClick={() => handleVideoFileSelect(null)} className="text-slate-400 hover:text-white gap-1.5"><RotateCcw className="w-4 h-4" />重新上传</Button>}
-          {currentStepIndex < stepLabels.length - 1 && <Button size="sm" onClick={handleNext} disabled={!canGoNext} className="gradient-bg hover:brightness-110 text-white rounded-lg gap-1.5 disabled:opacity-40">{currentStep === 'upload' ? '下一步：字幕识别' : currentStep === 'subtitle' ? '下一步：配置参数' : '下一步：内容生成'}<ChevronRight className="w-4 h-4" /></Button>}
-        </div>
       </div>
 
       <CreateProjectModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} onCreate={handleCreateProject} />
