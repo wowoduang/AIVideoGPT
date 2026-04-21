@@ -10,6 +10,7 @@ edge-tts==7.2.7
 streamlit==1.45.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
+python-multipart>=0.0.9
 watchdog==6.0.0
 loguru>=0.7.3
 tomli>=2.2.1
