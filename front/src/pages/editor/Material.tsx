@@ -148,55 +148,64 @@ export default function MaterialPage() {
   };
 
   return (
-    <div className="container-page py-8 flex-1 flex flex-col">
+    <div className="container-page py-8 pb-28 flex-1 flex flex-col">
       <header className="mb-6">
-        <h2 className="text-xl font-bold">
+        <h2 className="text-2xl font-bold">
           项目名称：<span className="text-[#46ec13]">{project.name}</span>
         </h2>
-        <p className="text-sm text-white/50 mt-1">
+        <p className="text-sm text-white/55 mt-1">
           上传您的视频文件，系统将自动提取音频并识别字幕
         </p>
       </header>
 
       {/* Steps indicator */}
-      <div className="flex items-center gap-3 mb-8 text-sm flex-wrap">
-        {STEPS.map((s, i) => {
-          const active = step === s.key;
-          const done =
-            STEPS.findIndex((x) => x.key === step) > i ||
-            (project.currentStep === 'generate' && s.key !== 'generate');
-          return (
-            <div key={s.key} className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setStep(s.key)}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-full border transition',
-                  active
-                    ? 'border-[#46ec13] bg-[#46ec13]/10 text-[#46ec13]'
-                    : done
-                      ? 'border-[#46ec13]/30 text-white/80 hover:border-[#46ec13]/60'
-                      : 'border-white/10 text-white/55 hover:border-white/25'
-                )}
-              >
-                <span
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 mb-6">
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          {STEPS.map((s, i) => {
+            const active = step === s.key;
+            const done =
+              STEPS.findIndex((x) => x.key === step) > i ||
+              (project.currentStep === 'generate' && s.key !== 'generate');
+            return (
+              <div key={s.key} className="flex items-center gap-2 flex-1 min-w-[160px]">
+                <button
+                  type="button"
+                  onClick={() => setStep(s.key)}
                   className={cn(
-                    'w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-semibold',
-                    active || done
-                      ? 'bg-[#46ec13] text-[#060a07]'
-                      : 'bg-white/10 text-white/70'
+                    'flex items-center gap-2 px-3 py-1.5 rounded-full transition',
+                    active
+                      ? 'text-[#46ec13]'
+                      : done
+                        ? 'text-white/85 hover:text-white'
+                        : 'text-white/50 hover:text-white'
                   )}
                 >
-                  {done ? <CheckCircle2 className="w-3 h-3" /> : i + 1}
-                </span>
-                {s.label}
-              </button>
-              {i < STEPS.length - 1 ? (
-                <div className="w-8 h-px bg-white/10" />
-              ) : null}
-            </div>
-          );
-        })}
+                  <span
+                    className={cn(
+                      'w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold border',
+                      active
+                        ? 'bg-[#46ec13] text-[#060a07] border-[#46ec13]'
+                        : done
+                          ? 'bg-[#46ec13]/90 text-[#060a07] border-[#46ec13]/90'
+                          : 'bg-white/5 text-white/60 border-white/15'
+                    )}
+                  >
+                    {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+                  </span>
+                  <span className="text-sm">{s.label}</span>
+                </button>
+                {i < STEPS.length - 1 ? (
+                  <div
+                    className={cn(
+                      'flex-1 h-px',
+                      done ? 'bg-[#46ec13]/50' : 'bg-white/10'
+                    )}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Step content */}
@@ -351,8 +360,8 @@ export default function MaterialPage() {
         ) : null}
       </div>
 
-      {/* Footer actions */}
-      <footer className="mt-8 flex items-center justify-between border-t border-white/5 pt-5">
+      {/* Sticky footer actions */}
+      <footer className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-[#060a07]/95 backdrop-blur px-6 py-3 flex items-center justify-between">
         <Button
           variant="ghost"
           onClick={() => navigate('/projects')}
