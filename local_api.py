@@ -12,10 +12,10 @@ def main() -> None:
 
     host = str(config.app.get("local_api_host", "127.0.0.1") or "127.0.0.1")
     port = int(config.app.get("local_api_port", 18000) or 18000)
-    
+
     # 使用 Server 类而不是 uvicorn.run，更好地处理信号
-    config = Config("app.api.main:app", host=host, port=port, reload=False)
-    server = Server(config)
+    uvicorn_config = Config("app.api.main:app", host=host, port=port, reload=False)
+    server = Server(uvicorn_config)
     
     # 确保能正确响应 Ctrl+C
     def handle_signal(sig, frame):
