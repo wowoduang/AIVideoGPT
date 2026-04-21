@@ -113,9 +113,13 @@ def load_config(config_path: str = ""):
         _config_ = toml.load(target_config_file)
     except Exception as e:
         logger.warning(f"load config failed: {str(e)}, try to load as utf-8-sig")
-        with open(target_config_file, mode="r", encoding="utf-8-sig") as fp:
-            _cfg_content = fp.read()
-            _config_ = toml.loads(_cfg_content)
+        try:
+            with open(target_config_file, mode="r", encoding="utf-8-sig") as fp:
+                _cfg_content = fp.read()
+                _config_ = toml.loads(_cfg_content)
+        except Exception as e2:
+            logger.error(f"load config failed again: {str(e2)}")
+            raise RuntimeError(f"无法加载配置文件: {target_config_file}") from e2
     return _config_
 
 

@@ -5,7 +5,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import auth, health, jobs, system
+from app.api.routers import auth, health, jobs, system, uploads
+from app.api.route_registry import register_workbench_routes
 from app.config import config
 
 
@@ -34,6 +35,10 @@ def create_app() -> FastAPI:
     app.include_router(system.router, prefix="/api/v1")
     app.include_router(jobs.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(uploads.router, prefix="/api/v1")
+    
+    # 注册 workbench 相关路由
+    register_workbench_routes(app)
 
     @app.get("/")
     def root():
